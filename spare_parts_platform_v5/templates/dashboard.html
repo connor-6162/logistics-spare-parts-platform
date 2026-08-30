@@ -1,6 +1,6 @@
 {% extends 'base.html' %}{% block title %}数据驾驶舱 - 备件智管平台{% endblock %}{% block page_title %}数据驾驶舱{% endblock %}
 {% block content %}
-<div class="page-head"><div><h2>{{ t('运营总览') }}</h2><p>{{ t('实时掌握库存健康度、采购进度和备件寿命风险') }}</p></div><div class="actions">{% if can('export_data') %}<a class="btn btn-ghost" href="{{ url_for('export_csv', kind='stock') }}">{{ t('导出库存') }}</a>{% endif %}{% if can('report_fault') %}<a class="btn btn-primary" href="{{ url_for('faults') }}">{{ t('快速故障提报') }}</a>{% endif %}</div></div>
+<div class="page-head"><div><h2>{{ t('运营总览') }}</h2><p>{{ t('实时掌握库存健康度、采购进度和备件寿命风险') }}</p></div><div class="actions dashboard-actions"><button class="ai-assistant-card" type="button" data-assistant-open><span class="ai-orb">AI</span><span class="ai-card-copy"><strong>{{ t('AI 智能助手') }}</strong><small>{{ t('提前预警 · 只读查询 · 智能问答') }}</small></span><span class="ai-alert-total" data-assistant-total>{{ assistant_summary.total }}</span></button>{% if can('export_data') %}<a class="btn btn-ghost" href="{{ url_for('export_csv', kind='stock') }}">{{ t('导出库存') }}</a>{% endif %}{% if can('report_fault') %}<a class="btn btn-primary" href="{{ url_for('faults') }}">{{ t('快速故障提报') }}</a>{% endif %}</div></div>
 <section class="grid grid-4">
   <div class="card metric-card"><span class="metric-icon">{{ 'P' if current_lang == 'en' else '库' }}</span><div class="metric-label">备件品规总数</div><div class="metric-value">{{ parts|length }}</div><div class="metric-note"><strong>{{ parts|sum(attribute='stock') }}</strong> 件实时库存</div></div>
   <div class="card metric-card"><span class="metric-icon">{{ 'A' if current_lang == 'en' else '警' }}</span><div class="metric-label">库存预警</div><div class="metric-value">{{ low_parts|length }}</div><div class="metric-note">其中 <strong>{{ parts|selectattr('stock','equalto',0)|list|length }}</strong> 项紧急缺货</div></div>
@@ -16,4 +16,41 @@
   <div class="card"><div class="card-head"><h3>{{ t('库存风险清单') }}</h3>{% if can('view_stock') %}<a href="{{ url_for('stock') }}">{{ t('进入库存管理') }}</a>{% endif %}</div><div class="table-wrap"><table><thead><tr><th>备件编号</th><th>品目 / 规格</th><th>{{ t('货位') }}</th><th>{{ t('库存') }}</th><th>{{ t('安全范围') }}</th><th>{{ t('状态') }}</th></tr></thead><tbody>{% for part in parts[:7] %}<tr><td class="cell-main">{{ part.code }}</td><td>{{ part.category }}<div class="cell-sub">{{ part.specification }}</div></td><td>{{ part.location }}</td><td><strong>{{ part.stock }}</strong></td><td>{{ part.min_stock }} - {{ part.max_stock }}</td><td><span class="badge {{ part.stock_status }}">{{ t(part.stock_status) }}</span></td></tr>{% endfor %}</tbody></table></div></div>
   <div class="card"><div class="card-head"><h3>最新操作动态</h3><small>审计留痕</small></div><div class="card-body"><div class="timeline">{% for log in recent %}<div class="timeline-item"><span class="timeline-dot"></span><div><p><strong>{{ log.action }}</strong> · {{ log.detail }}</p><small>{{ log.user_name }} · {{ log.created_at|datetime }}</small></div></div>{% endfor %}</div></div></div>
 </section>
+
+<div class="assistant-layer" data-assistant-layer aria-hidden="true">
+  <button class="assistant-backdrop" type="button" data-assistant-close aria-label="{{ t('关闭') }}"></button>
+  <aside class="assistant-panel" role="dialog" aria-modal="true" aria-labelledby="assistant-title"
+    data-alerts-url="{{ url_for('assistant_alerts') }}"
+    data-chat-url="{{ url_for('assistant_chat') }}"
+    data-csrf-token="{{ csrf_token }}"
+    data-thinking="{{ t('正在查询只读业务数据…') }}"
+    data-error="{{ t('暂时无法回答，请稍后重试。') }}"
+    data-local-source="{{ t('由本地规则回答') }}"
+    data-cloudflare-source="{{ t('由 Cloudflare Workers AI 回答') }}">
+    <div class="assistant-head">
+      <div class="assistant-title"><span class="ai-orb">AI</span><div><h3 id="assistant-title">{{ t('AI 智能助手') }}</h3><small>{{ t('只读安全模式') }}</small></div></div>
+      <button class="assistant-close" type="button" data-assistant-close aria-label="{{ t('关闭') }}">×</button>
+    </div>
+    <div class="assistant-alerts">
+      <div><small>{{ t('低库存') }}</small><strong data-alert-low>{{ assistant_summary.low_stock if assistant_summary.low_stock is not none else '-' }}</strong></div>
+      <div><small>{{ t('待处理故障') }}</small><strong data-alert-faults>{{ assistant_summary.faults if assistant_summary.faults is not none else '-' }}</strong></div>
+      <div><small>{{ t('寿命风险') }}</small><strong data-alert-lifecycle>{{ assistant_summary.lifecycle if assistant_summary.lifecycle is not none else '-' }}</strong></div>
+    </div>
+    <p class="assistant-safety">{{ t('可查询库存、故障和寿命预警；外部 AI 不可用时自动使用本地回答。') }}</p>
+    <div class="assistant-messages" data-assistant-messages aria-live="polite">
+      <div class="assistant-message assistant-message-ai"><p>{{ t('本地预警已就绪') }}。{{ t('助手不会执行新增、修改、审批或删除操作。') }}</p></div>
+    </div>
+    <div class="assistant-prompts">
+      <button type="button" data-assistant-prompt="{{ t('有哪些低库存备件？') }}">{{ t('低库存') }}</button>
+      <button type="button" data-assistant-prompt="{{ t('有哪些待处理故障？') }}">{{ t('待处理故障') }}</button>
+      <button type="button" data-assistant-prompt="{{ t('有哪些寿命预警？') }}">{{ t('寿命风险') }}</button>
+      <button type="button" data-assistant-prompt="{{ t('请汇总当前风险') }}">{{ t('当前风险') }}</button>
+    </div>
+    <form class="assistant-form" data-assistant-form>
+      <label class="sr-only" for="assistant-input">{{ t('AI 智能助手') }}</label>
+      <textarea id="assistant-input" maxlength="500" rows="2" data-assistant-input placeholder="{{ t('输入与库存、故障或寿命相关的问题') }}"></textarea>
+      <button class="btn btn-primary" type="submit" data-assistant-send>{{ t('发送') }}</button>
+    </form>
+  </aside>
+</div>
 {% endblock %}
