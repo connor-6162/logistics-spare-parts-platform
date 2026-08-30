@@ -24,7 +24,11 @@ if (-not (Test-Path -LiteralPath $Installer)) {
 }
 
 Write-Host "Installing Python application and dependencies..." -ForegroundColor Cyan
-& $Installer
+$PowerShellExe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+& $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File $Installer
+if ($LASTEXITCODE -ne 0) {
+    throw "Application installer failed with exit code $LASTEXITCODE."
+}
 
 $AppRoot = if (Test-Path -LiteralPath "D:\") { "D:\SparePartsPlatform" } else { "C:\SparePartsPlatform" }
 $ConfigPath = Join-Path $AppRoot "deployment\windows\production.env.ps1"
