@@ -59,6 +59,15 @@ $Config = $Config.Replace("`$env:PORT = '5055'", "`$env:PORT = '80'")
 Set-Content -LiteralPath $ConfigPath -Value $Config -Encoding UTF8
 
 Stop-ScheduledTask -TaskName "SparePartsPlatform" -ErrorAction SilentlyContinue
+foreach ($Port in 5055, 80) {
+    $Listeners = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+    foreach ($Listener in $Listeners) {
+        $ProcessInfo = Get-CimInstance Win32_Process -Filter "ProcessId=$($Listener.OwningProcess)" -ErrorAction SilentlyContinue
+        if ($ProcessInfo -and ($ProcessInfo.CommandLine -like "*$AppRoot*" -or $ProcessInfo.CommandLine -like "*serve.py*")) {
+            Stop-Process -Id $Listener.OwningProcess -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
 Start-Sleep -Seconds 2
 try {
     New-NetFirewallRule -DisplayName "Spare Parts Platform HTTP" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 80 -ErrorAction Stop | Out-Null
@@ -67,7 +76,7 @@ try {
 Start-ScheduledTask -TaskName "SparePartsPlatform"
 
 $Ready = $false
-for ($Attempt = 1; $Attempt -le 45; $Attempt++) {
+for ($Attempt = 1; $Attempt -le 90; $Attempt++) {
     Start-Sleep -Seconds 1
     try {
         $Health = Invoke-RestMethod -Uri "http://127.0.0.1/healthz" -TimeoutSec 2

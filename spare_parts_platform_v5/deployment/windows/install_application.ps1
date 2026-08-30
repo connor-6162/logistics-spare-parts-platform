@@ -82,6 +82,22 @@ Set-Content -LiteralPath $ConfigPath -Value $Config -Encoding UTF8
 
 $StartScript = Join-Path $AppRoot "deployment\windows\start_server.ps1"
 $PowerShellExe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+$ExistingTask = Get-ScheduledTask -TaskName "SparePartsPlatform" -ErrorAction SilentlyContinue
+if ($ExistingTask) {
+    Stop-ScheduledTask -TaskName "SparePartsPlatform" -ErrorAction SilentlyContinue
+}
+
+foreach ($Port in 5055, 80) {
+    $Listeners = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+    foreach ($Listener in $Listeners) {
+        $ProcessInfo = Get-CimInstance Win32_Process -Filter "ProcessId=$($Listener.OwningProcess)" -ErrorAction SilentlyContinue
+        if ($ProcessInfo -and ($ProcessInfo.CommandLine -like "*$AppRoot*" -or $ProcessInfo.CommandLine -like "*serve.py*")) {
+            Stop-Process -Id $Listener.OwningProcess -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+Start-Sleep -Seconds 2
+
 $Action = New-ScheduledTaskAction -Execute $PowerShellExe -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$StartScript`""
 $Trigger = New-ScheduledTaskTrigger -AtStartup
 $Principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
@@ -90,7 +106,7 @@ Register-ScheduledTask -TaskName "SparePartsPlatform" -Action $Action -Trigger $
 Start-ScheduledTask -TaskName "SparePartsPlatform"
 
 $Ready = $false
-for ($Attempt = 1; $Attempt -le 30; $Attempt++) {
+for ($Attempt = 1; $Attempt -le 90; $Attempt++) {
     Start-Sleep -Seconds 1
     try {
         $Health = Invoke-RestMethod -Uri "http://127.0.0.1:5055/healthz" -TimeoutSec 2
@@ -103,6 +119,8 @@ for ($Attempt = 1; $Attempt -le 30; $Attempt++) {
 }
 
 if (-not $Ready) {
+    Get-ScheduledTaskInfo -TaskName "SparePartsPlatform" -ErrorAction SilentlyContinue |
+        Format-List LastRunTime, LastTaskResult | Out-Host
     throw "The application did not become healthy. Check $DataRoot\logs\application.log"
 }
 

@@ -18,4 +18,12 @@ if (-not (Test-Path -LiteralPath $PythonExe)) {
 }
 
 Set-Location -LiteralPath $AppRoot
-& $PythonExe "serve.py" *>> (Join-Path $LogRoot "application.log")
+$ServerScript = Join-Path $AppRoot "serve.py"
+$Process = Start-Process `
+    -FilePath $PythonExe `
+    -ArgumentList $ServerScript `
+    -WorkingDirectory $AppRoot `
+    -Wait `
+    -PassThru
+
+exit $Process.ExitCode
