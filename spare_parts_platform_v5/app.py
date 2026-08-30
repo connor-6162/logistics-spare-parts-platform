@@ -1297,6 +1297,7 @@ def stock():
 
 def create_fault_from_form(public=False):
     equipment_item = db.get_or_404(Equipment, int(request.form["equipment_id"]))
+    source = request.form.get("source", "").strip().lower()
     item = FaultReport(
         number=next_number("GZ", FaultReport),
         equipment=equipment_item,
@@ -1305,7 +1306,8 @@ def create_fault_from_form(public=False):
         contact=request.form.get("contact", "").strip(),
     )
     db.session.add(item)
-    audit("故障提报", f"{item.number} {equipment_item.full_name}")
+    source_label = " · 扫码入口" if public and source == "qr" else ""
+    audit("故障提报", f"{item.number} {equipment_item.full_name}{source_label}")
     db.session.commit()
     return item
 
@@ -1333,23 +1335,55 @@ def faults():
 
 @app.route("/fault-report", methods=["GET", "POST"])
 def public_fault():
+    report_source = request.values.get("source", "").strip().lower()
+    if report_source not in {"qr"}:
+        report_source = ""
     submitted = None
     if request.method == "POST":
         submitted = create_fault_from_form(public=True)
     return render_template(
-        "public_fault.html", equipment=Equipment.query.all(), submitted=submitted
+        "public_fault.html",
+        equipment=Equipment.query.all(),
+        submitted=submitted,
+        report_source=report_source,
     )
+
+
+@app.get("/scan/fault")
+def scan_fault():
+    """Stable public entry encoded into the dashboard QR code."""
+    lang = request.args.get("lang", "zh")
+    if lang in {"zh", "en"}:
+        session["lang"] = lang
+    return redirect(url_for("public_fault", source="qr"))
 
 
 @app.route("/fault-report/qr.png")
 def fault_qr():
     base_url = PUBLIC_BASE_URL or request.url_root.rstrip("/")
-    target = base_url + url_for("public_fault")
-    image = qrcode.make(target)
+    lang = request.args.get("lang", session.get("lang", "zh"))
+    if lang not in {"zh", "en"}:
+        lang = "zh"
+    target = base_url + url_for("scan_fault", lang=lang)
+    code = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=10,
+        border=4,
+    )
+    code.add_data(target)
+    code.make(fit=True)
+    image = code.make_image(fill_color="black", back_color="white")
     stream = io.BytesIO()
     image.save(stream, "PNG")
     stream.seek(0)
-    return send_file(stream, mimetype="image/png", download_name="fault-report-qr.png")
+    response = send_file(
+        stream, mimetype="image/png", download_name="fault-report-qr.png"
+    )
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["X-QR-Target"] = target
+    return response
 
 
 @app.get("/healthz")
