@@ -48,49 +48,5 @@ if ($LASTEXITCODE -ne 0) {
     throw "Application installer failed with exit code $LASTEXITCODE."
 }
 
-$AppRoot = if (Test-Path -LiteralPath "D:\") { "D:\SparePartsPlatform" } else { "C:\SparePartsPlatform" }
-$ConfigPath = Join-Path $AppRoot "deployment\windows\production.env.ps1"
-$Config = Get-Content -LiteralPath $ConfigPath -Raw
-$Config = $Config.Replace("`$env:SESSION_COOKIE_SECURE = 'True'", "`$env:SESSION_COOKIE_SECURE = 'False'")
-$Config = $Config.Replace("`$env:PREFERRED_URL_SCHEME = 'https'", "`$env:PREFERRED_URL_SCHEME = 'http'")
-$Config = $Config.Replace("`$env:PUBLIC_BASE_URL = 'https://lwqgraduationproject.cn'", "`$env:PUBLIC_BASE_URL = 'http://lwqgraduationproject.cn'")
-$Config = $Config.Replace("`$env:HOST = '127.0.0.1'", "`$env:HOST = '0.0.0.0'")
-$Config = $Config.Replace("`$env:PORT = '5055'", "`$env:PORT = '80'")
-Set-Content -LiteralPath $ConfigPath -Value $Config -Encoding UTF8
-
-Stop-ScheduledTask -TaskName "SparePartsPlatform" -ErrorAction SilentlyContinue
-foreach ($Port in 5055, 80) {
-    $Listeners = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
-    foreach ($Listener in $Listeners) {
-        $ProcessInfo = Get-CimInstance Win32_Process -Filter "ProcessId=$($Listener.OwningProcess)" -ErrorAction SilentlyContinue
-        if ($ProcessInfo -and ($ProcessInfo.CommandLine -like "*$AppRoot*" -or $ProcessInfo.CommandLine -like "*serve.py*")) {
-            Stop-Process -Id $Listener.OwningProcess -Force -ErrorAction SilentlyContinue
-        }
-    }
-}
-Start-Sleep -Seconds 2
-try {
-    New-NetFirewallRule -DisplayName "Spare Parts Platform HTTP" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 80 -ErrorAction Stop | Out-Null
-} catch {
-}
-Start-ScheduledTask -TaskName "SparePartsPlatform"
-
-$Ready = $false
-for ($Attempt = 1; $Attempt -le 90; $Attempt++) {
-    Start-Sleep -Seconds 1
-    try {
-        $Health = Invoke-RestMethod -Uri "http://127.0.0.1/healthz" -TimeoutSec 2
-        if ($Health.status -eq "ok") {
-            $Ready = $true
-            break
-        }
-    } catch {
-    }
-}
-
-if (-not $Ready) {
-    throw "The application did not become healthy. Check the application log under SparePartsData\logs."
-}
-
 Write-Host "Deployment completed successfully." -ForegroundColor Green
-Write-Host "Open: http://lwqgraduationproject.cn" -ForegroundColor Green
+Write-Host "Open: https://lwqgraduationproject.cn" -ForegroundColor Green
