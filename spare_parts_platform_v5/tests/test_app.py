@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from html.parser import HTMLParser
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 
 class UserFacingTextParser(HTMLParser):
@@ -369,6 +370,116 @@ class PlatformFlowTest(unittest.TestCase):
             response = self.client.get(f"/export/{kind}.csv")
             self.assertEqual(response.status_code, 200)
             self.assertIn("text/csv", response.content_type)
+
+    def test_ai_assistant_card_alerts_and_read_only_local_chat(self):
+        dashboard = self.client.get("/")
+        body = dashboard.get_data(as_text=True)
+        self.assertIn("AI 智能助手", body)
+        self.assertIn("data-assistant-open", body)
+        alerts = self.client.get("/api/assistant/alerts")
+        self.assertEqual(alerts.status_code, 200)
+        snapshot = alerts.get_json()["snapshot"]
+        self.assertIn("low_stock", snapshot)
+        self.assertIn("faults", snapshot)
+        self.assertIn("lifecycle", snapshot)
+
+        with self.app.app_context():
+            before = {
+                "parts": self.module.Part.query.count(),
+                "faults": self.module.FaultReport.query.count(),
+                "lifecycles": self.module.Lifecycle.query.count(),
+                "audits": self.module.AuditLog.query.count(),
+            }
+        response = self.client.post(
+            "/api/assistant/chat",
+            json={"message": "请汇总当前风险"},
+            headers={"X-CSRF-Token": self.token()},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["source"], "local")
+        self.assertTrue(payload["read_only"])
+        self.assertEqual(
+            payload["tools_used"],
+            ["get_low_stock", "get_faults", "get_lifecycle_alerts"],
+        )
+        self.assertIn("低库存", payload["answer"])
+        with self.app.app_context():
+            after = {
+                "parts": self.module.Part.query.count(),
+                "faults": self.module.FaultReport.query.count(),
+                "lifecycles": self.module.Lifecycle.query.count(),
+                "audits": self.module.AuditLog.query.count(),
+            }
+        self.assertEqual(before, after)
+
+    def test_ai_assistant_respects_role_permissions(self):
+        worker_client = self.app.test_client()
+        worker_client.get("/login")
+        self.login("worker", "Worker123!", worker_client)
+        response = worker_client.get("/api/assistant/alerts")
+        self.assertEqual(response.status_code, 200)
+        snapshot = response.get_json()["snapshot"]
+        self.assertIsNotNone(snapshot["low_stock"])
+        self.assertIsNotNone(snapshot["faults"])
+        self.assertIsNone(snapshot["lifecycle"])
+        response = worker_client.post(
+            "/api/assistant/chat",
+            json={"message": "有哪些寿命预警？"},
+            headers={"X-CSRF-Token": self.token(worker_client)},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["tools_used"], [])
+
+    def test_ai_assistant_cloudflare_success_and_failure_fallback(self):
+        previous = (
+            self.module.AI_PROVIDER,
+            self.module.AI_ACCOUNT_ID,
+            self.module.AI_API_TOKEN,
+        )
+        self.module.AI_PROVIDER = "cloudflare"
+        self.module.AI_ACCOUNT_ID = "test-account"
+        self.module.AI_API_TOKEN = "test-token"
+        success = Mock()
+        success.raise_for_status.return_value = None
+        success.json.return_value = {
+            "success": True,
+            "result": {"response": "AI-generated inventory summary"},
+        }
+        try:
+            with patch.object(self.module.requests, "post", return_value=success) as post:
+                response = self.client.post(
+                    "/api/assistant/chat",
+                    json={"message": "Which parts are low in stock?"},
+                    headers={"X-CSRF-Token": self.token()},
+                )
+            payload = response.get_json()
+            self.assertEqual(payload["source"], "cloudflare")
+            self.assertEqual(payload["answer"], "AI-generated inventory summary")
+            self.assertIn("get_low_stock", payload["tools_used"])
+            request_json = post.call_args.kwargs["json"]
+            self.assertIn("READ_ONLY_DATA", request_json["prompt"])
+            self.assertNotIn("test-token", request_json["prompt"])
+
+            with patch.object(
+                self.module.requests,
+                "post",
+                side_effect=self.module.requests.Timeout("timeout"),
+            ):
+                response = self.client.post(
+                    "/api/assistant/chat",
+                    json={"message": "有哪些待处理故障？"},
+                    headers={"X-CSRF-Token": self.token()},
+                )
+            payload = response.get_json()
+            self.assertEqual(payload["source"], "local")
+            self.assertIn("待处理故障", payload["answer"])
+        finally:
+            (
+                self.module.AI_PROVIDER,
+                self.module.AI_ACCOUNT_ID,
+                self.module.AI_API_TOKEN,
+            ) = previous
 
 
 if __name__ == "__main__":
