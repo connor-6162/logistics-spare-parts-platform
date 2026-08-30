@@ -34,7 +34,14 @@ New-Item -ItemType Directory -Path $ExtractRoot -Force | Out-Null
 
 Write-Host "Downloading application source..." -ForegroundColor Cyan
 Invoke-WebRequest -Uri $RepositoryArchive -OutFile $ArchivePath -UseBasicParsing
-Expand-Archive -LiteralPath $ArchivePath -DestinationPath $ExtractRoot -Force
+if (Get-Command Expand-Archive -ErrorAction SilentlyContinue) {
+    Expand-Archive -LiteralPath $ArchivePath -DestinationPath $ExtractRoot -Force
+} else {
+    # Windows Server 2012 R2 ships with PowerShell 4.0, which has no
+    # Expand-Archive cmdlet. Use the built-in .NET ZIP implementation instead.
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($ArchivePath, $ExtractRoot)
+}
 
 $SourceRoot = Join-Path $ExtractRoot "logistics-spare-parts-platform-main\spare_parts_platform_v5"
 $Installer = Join-Path $SourceRoot "deployment\windows\install_application.ps1"
