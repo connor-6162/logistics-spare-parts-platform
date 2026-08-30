@@ -90,6 +90,54 @@ class PlatformFlowTest(unittest.TestCase):
         self.assertIn("本月损管比", faults)
         self.assertIn("本年度损管比", faults)
 
+    def test_qr_code_uses_public_https_scan_entry(self):
+        previous_base_url = self.module.PUBLIC_BASE_URL
+        try:
+            self.module.PUBLIC_BASE_URL = "https://lwqgraduationproject.cn"
+            response = self.client.get("/fault-report/qr.png?lang=en")
+        finally:
+            self.module.PUBLIC_BASE_URL = previous_base_url
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, "image/png")
+        self.assertEqual(
+            response.headers["X-QR-Target"],
+            "https://lwqgraduationproject.cn/scan/fault?lang=en",
+        )
+        self.assertIn("no-store", response.headers["Cache-Control"])
+        self.assertGreater(len(response.data), 500)
+
+    def test_scan_entry_opens_public_form_and_tracks_submission(self):
+        public_client = self.app.test_client()
+        response = public_client.get("/scan/fault?lang=en", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Mobile Equipment Fault Reporting", response.get_data(as_text=True))
+        self.assertIn('name="source" value="qr"', response.get_data(as_text=True))
+        with public_client.session_transaction() as sess:
+            token = sess["csrf_token"]
+        with self.app.app_context():
+            equipment_id = self.module.Equipment.query.first().id
+        response = public_client.post(
+            "/fault-report?source=qr",
+            data={
+                "csrf_token": token,
+                "source": "qr",
+                "equipment_id": equipment_id,
+                "reporter": "QR Test",
+                "contact": "10086",
+                "description": "QR end-to-end test",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Work Order No.", response.get_data(as_text=True))
+        with self.app.app_context():
+            self.assertIsNotNone(
+                self.module.FaultReport.query.filter_by(reporter="QR Test").first()
+            )
+            audit_item = self.module.AuditLog.query.order_by(
+                self.module.AuditLog.id.desc()
+            ).first()
+            self.assertIn("扫码入口", audit_item.detail)
+
     def test_language_switch(self):
         response = self.client.get("/language/en", follow_redirects=True)
         body = response.get_data(as_text=True)
