@@ -81,4 +81,123 @@ document.addEventListener("DOMContentLoaded", () => {
       form.requestSubmit();
     });
   });
+
+  const assistantLayer = document.querySelector("[data-assistant-layer]");
+  const assistantPanel = assistantLayer?.querySelector(".assistant-panel");
+  const assistantMessages = assistantLayer?.querySelector("[data-assistant-messages]");
+  const assistantForm = assistantLayer?.querySelector("[data-assistant-form]");
+  const assistantInput = assistantLayer?.querySelector("[data-assistant-input]");
+  const assistantSend = assistantLayer?.querySelector("[data-assistant-send]");
+  const appendAssistantMessage = (text, kind, source = "") => {
+    if (!assistantMessages) return null;
+    const wrapper = document.createElement("div");
+    wrapper.className = `assistant-message assistant-message-${kind}`;
+    const paragraph = document.createElement("p");
+    paragraph.textContent = text;
+    wrapper.appendChild(paragraph);
+    if (source) {
+      const caption = document.createElement("small");
+      caption.textContent = source;
+      wrapper.appendChild(caption);
+    }
+    assistantMessages.appendChild(wrapper);
+    assistantMessages.scrollTop = assistantMessages.scrollHeight;
+    return wrapper;
+  };
+  const updateAssistantSnapshot = (snapshot) => {
+    if (!snapshot) return;
+    const fields = [
+      ["[data-alert-low]", snapshot.low_stock],
+      ["[data-alert-faults]", snapshot.faults],
+      ["[data-alert-lifecycle]", snapshot.lifecycle],
+      ["[data-assistant-total]", snapshot.total],
+    ];
+    fields.forEach(([selector, value]) => {
+      document.querySelectorAll(selector).forEach((element) => {
+        element.textContent = value === null || value === undefined ? "-" : String(value);
+      });
+    });
+  };
+  const refreshAssistantAlerts = async () => {
+    if (!assistantPanel?.dataset.alertsUrl) return;
+    try {
+      const response = await fetch(assistantPanel.dataset.alertsUrl, {
+        headers: { Accept: "application/json" }, credentials: "same-origin",
+      });
+      if (!response.ok) return;
+      const payload = await response.json();
+      updateAssistantSnapshot(payload.snapshot);
+    } catch (_error) {
+      // Server-rendered alert counts remain available when refresh is unavailable.
+    }
+  };
+  const openAssistant = () => {
+    if (!assistantLayer) return;
+    assistantLayer.classList.add("open");
+    assistantLayer.setAttribute("aria-hidden", "false");
+    document.body.classList.add("assistant-open");
+    refreshAssistantAlerts();
+    window.setTimeout(() => assistantInput?.focus(), 180);
+  };
+  const closeAssistant = () => {
+    if (!assistantLayer) return;
+    assistantLayer.classList.remove("open");
+    assistantLayer.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("assistant-open");
+  };
+  document.querySelectorAll("[data-assistant-open]").forEach((button) => button.addEventListener("click", openAssistant));
+  assistantLayer?.querySelectorAll("[data-assistant-close]").forEach((button) => button.addEventListener("click", closeAssistant));
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && assistantLayer?.classList.contains("open")) closeAssistant();
+  });
+  assistantLayer?.querySelectorAll("[data-assistant-prompt]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!assistantInput || !assistantForm) return;
+      assistantInput.value = button.dataset.assistantPrompt || button.textContent.trim();
+      assistantForm.requestSubmit();
+    });
+  });
+  assistantInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      assistantForm?.requestSubmit();
+    }
+  });
+  assistantForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const message = assistantInput?.value.trim();
+    if (!message || !assistantPanel?.dataset.chatUrl) return;
+    appendAssistantMessage(message, "user");
+    assistantInput.value = "";
+    assistantInput.disabled = true;
+    if (assistantSend) assistantSend.disabled = true;
+    const thinking = appendAssistantMessage(assistantPanel.dataset.thinking || "…", "ai assistant-message-thinking");
+    try {
+      const response = await fetch(assistantPanel.dataset.chatUrl, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "X-CSRF-Token": assistantPanel.dataset.csrfToken || "",
+        },
+        body: JSON.stringify({ message }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      thinking?.remove();
+      if (!response.ok || !payload.answer) throw new Error("assistant request failed");
+      const source = payload.source === "cloudflare"
+        ? assistantPanel.dataset.cloudflareSource
+        : assistantPanel.dataset.localSource;
+      appendAssistantMessage(payload.answer, "ai", source || "");
+      refreshAssistantAlerts();
+    } catch (_error) {
+      thinking?.remove();
+      appendAssistantMessage(assistantPanel.dataset.error || "Unable to answer.", "ai");
+    } finally {
+      assistantInput.disabled = false;
+      if (assistantSend) assistantSend.disabled = false;
+      assistantInput.focus();
+    }
+  });
 });
