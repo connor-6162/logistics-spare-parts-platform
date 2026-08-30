@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="{{ 'en' if current_lang == 'en' else 'zh-CN' }}">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>账户注册 - 备件智管平台</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
+<body style="background:linear-gradient(145deg,#edf4ff,#f7f9fc);min-height:100vh;padding:28px 18px">
+  <div style="position:fixed;right:20px;top:18px" class="language-switch"><a class="{{ 'active' if current_lang == 'zh' }}" href="{{ url_for('set_language', lang='zh') }}">{{ 'ZH' if current_lang == 'en' else '中文' }}</a><a class="{{ 'active' if current_lang == 'en' }}" href="{{ url_for('set_language', lang='en') }}">EN</a></div>
+  <main style="max-width:760px;margin:auto">
+    <div class="brand" style="color:var(--ink);padding-left:0"><div class="brand-mark">{{ 'S' if current_lang == 'en' else '备' }}</div><div><strong>{{ t('备件智管平台') }}</strong><small>ACCOUNT APPLICATION</small></div></div>
+    <div class="card"><div class="card-head"><div><h2 style="margin:0">{{ t('申请平台账户') }}</h2><p class="cell-sub" style="margin-bottom:0">{{ t('账户需由系统管理员审核启用后方可登录') }}</p></div><a href="{{ url_for('login') }}" class="btn btn-ghost">{{ t('返回登录') }}</a></div>
+      {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}<div style="padding:16px 20px 0">{% for category, message in messages %}<div class="flash {{ category }}" style="position:static;margin-bottom:8px">{{ message }}</div>{% endfor %}</div>{% endif %}{% endwith %}
+      <form class="card-body form-grid" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="field"><label class="required">{{ t('用户名') }}</label><input name="username" required pattern="[A-Za-z][A-Za-z0-9_]{2,31}" placeholder="worker_01"></div>
+        <div class="field"><label class="required">{{ t('显示姓名') }}</label><input name="display_name" required></div>
+        <div class="field"><label class="required">{{ t('所属部门') }}</label><input name="department" required></div>
+        <div class="field"><label class="required">{{ t('申请角色') }}</label><select name="role" required>{% for key, names in public_roles.items() %}<option value="{{ key }}">{{ role_name(key) }}</option>{% endfor %}</select></div>
+        <div class="field"><label class="required">{{ t('密码') }}</label><input type="password" name="password" required minlength="8" placeholder="At least 8 characters"></div>
+        <div class="field"><label class="required">{{ t('确认密码') }}</label><input type="password" name="confirm_password" required minlength="8"></div>
+        <div class="field full"><div class="callout">密码须至少 8 位，并同时包含大写字母、小写字母、数字和特殊字符。</div></div>
+        <div class="form-footer"><button class="btn btn-primary">{{ t('提交注册申请') }}</button></div>
+      </form>
+    </div>
+  </main>
+  <script>window.PAGE_TRANSLATIONS = {{ translations|tojson }};</script><script src="{{ url_for('static', filename='app.js', v='5') }}"></script>
+</body></html>

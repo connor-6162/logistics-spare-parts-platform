@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="{{ 'en' if current_lang == 'en' else 'zh-CN' }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}备品备件数字化管理平台{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="brand"><div class="brand-mark">{{ 'S' if current_lang == 'en' else '备' }}</div><div><strong>{{ t('备件智管平台') }}</strong><small>SPARE PARTS HUB</small></div></div>
+    <div class="nav-label">{{ t('工作台') }}</div>
+    {% if can('dashboard') %}<a class="nav-item {{ 'active' if request.endpoint == 'dashboard' }}" href="{{ url_for('dashboard') }}"><span class="nav-icon">▦</span>{{ t('数据驾驶舱') }}</a>{% endif %}
+    <div class="nav-label">{{ t('基础与采购') }}</div>
+    {% if can('view_equipment') %}<a class="nav-item {{ 'active' if request.endpoint == 'equipment' }}" href="{{ url_for('equipment') }}"><span class="nav-icon">{{ 'E' if current_lang == 'en' else '设' }}</span>{{ t('设备基础信息') }}</a>{% endif %}
+    {% if can('view_parts') %}<a class="nav-item {{ 'active' if request.endpoint == 'parts' }}" href="{{ url_for('parts') }}"><span class="nav-icon">{{ 'P' if current_lang == 'en' else '件' }}</span>{{ t('备件基础信息') }}</a>{% endif %}
+    {% if can('view_suppliers') %}<a class="nav-item {{ 'active' if request.endpoint == 'suppliers' }}" href="{{ url_for('suppliers') }}"><span class="nav-icon">{{ 'S' if current_lang == 'en' else '供' }}</span>{{ t('供应商管理') }}</a>{% endif %}
+    {% if can('view_procurement') %}<a class="nav-item {{ 'active' if request.endpoint == 'procurement' }}" href="{{ url_for('procurement') }}"><span class="nav-icon">{{ 'P' if current_lang == 'en' else '采' }}</span>{{ t('采购比价') }}</a>{% endif %}
+    <div class="nav-label">{{ t('库存流转') }}</div>
+    {% if can('view_inbound') %}<a class="nav-item {{ 'active' if request.endpoint == 'inbound' }}" href="{{ url_for('inbound') }}"><span class="nav-icon">{{ 'I' if current_lang == 'en' else '入' }}</span>{{ t('登记入库') }}</a>{% endif %}
+    {% if can('view_stock') %}<a class="nav-item {{ 'active' if request.endpoint == 'stock' }}" href="{{ url_for('stock') }}"><span class="nav-icon">{{ 'I' if current_lang == 'en' else '库' }}</span>{{ t('在库管理') }}</a>{% endif %}
+    {% if can('view_faults') %}<a class="nav-item {{ 'active' if request.endpoint == 'faults' }}" href="{{ url_for('faults') }}"><span class="nav-icon">{{ 'F' if current_lang == 'en' else '领' }}</span>{{ t('故障与领用') }}</a>{% endif %}
+    {% if can('view_disposals') %}<a class="nav-item {{ 'active' if request.endpoint == 'disposals' }}" href="{{ url_for('disposals') }}"><span class="nav-icon">{{ 'D' if current_lang == 'en' else '废' }}</span>{{ t('废弃件管理') }}</a>{% endif %}
+    <div class="nav-label">{{ t('智能管控') }}</div>
+    {% if can('view_lifecycle') %}<a class="nav-item {{ 'active' if request.endpoint == 'lifecycle' }}" href="{{ url_for('lifecycle') }}"><span class="nav-icon">{{ 'L' if current_lang == 'en' else '警' }}</span>{{ t('寿命预警') }}</a>{% endif %}
+    {% if current_user.is_authenticated and current_user.role == 'admin' %}<a class="nav-item {{ 'active' if request.endpoint == 'users' }}" href="{{ url_for('users') }}"><span class="nav-icon">{{ 'U' if current_lang == 'en' else '权' }}</span>{{ t('用户与权限') }}</a>{% endif %}
+    <div class="sidebar-footer">
+      {% if current_user.is_authenticated %}
+      <div class="sidebar-user"><div class="avatar">{{ role_name(current_user.role)[:1]|upper if current_lang == 'en' else current_user.display_name[:1] }}</div><div><strong>{{ t(current_user.display_name) }}</strong><small>{{ t(current_user.department) }} · {{ role_name(current_user.role) }}</small></div></div>
+      <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="logout-button">{{ t('退出登录') }}</button></form>
+      {% else %}<a class="btn btn-primary" style="width:100%" href="{{ url_for('login') }}">{{ t('返回登录') }}</a>{% endif %}
+    </div>
+  </aside>
+  <main class="main">
+    <header class="topbar">
+      <div style="display:flex;align-items:center;gap:12px"><button class="btn btn-ghost mobile-menu" data-mobile-menu>☰</button><div><h1>{% block page_title %}数字化管理平台{% endblock %}</h1><p>{{ t('一物一码 · 全程可视 · 智能预警') }}</p></div></div>
+      <div class="top-actions"><div class="language-switch"><a class="{{ 'active' if current_lang == 'zh' }}" href="{{ url_for('set_language', lang='zh') }}">{{ 'ZH' if current_lang == 'en' else '中文' }}</a><a class="{{ 'active' if current_lang == 'en' }}" href="{{ url_for('set_language', lang='en') }}">EN</a></div><span class="badge info">{{ app_version }}</span><span class="badge info">{{ t('系统运行正常') }}</span><span style="color:#8491a5">{{ today.strftime('%Y-%m-%d') }}</span></div>
+    </header>
+    {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}<div class="flash-stack">{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}</div>{% endif %}{% endwith %}
+    <div class="content">{% block content %}{% endblock %}</div>
+  </main>
+</div>
+<script>window.PAGE_TRANSLATIONS = {{ translations|tojson }};</script>
+<script src="{{ url_for('static', filename='app.js', v='5') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>
