@@ -77,6 +77,11 @@ $Config = @"
 `$env:PORT = '5055'
 `$env:WAITRESS_THREADS = '8'
 `$env:TRUSTED_PROXY = '127.0.0.1'
+`$env:AI_PROVIDER = 'cloudflare'
+`$env:CLOUDFLARE_ACCOUNT_ID = ''
+`$env:CLOUDFLARE_API_TOKEN = ''
+`$env:CLOUDFLARE_AI_MODEL = '@cf/meta/llama-3.1-8b-instruct'
+`$env:AI_TIMEOUT_SECONDS = '12'
 "@
 Set-Content -LiteralPath $ConfigPath -Value $Config -Encoding UTF8
 
