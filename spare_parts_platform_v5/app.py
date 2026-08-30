@@ -36,6 +36,15 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+
+
+def env_flag(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.lower() in {"1", "true", "yes", "on"}
+
+
 app = Flask(__name__)
 app.config.update(
     SECRET_KEY=os.environ.get("SECRET_KEY", "dev-change-this-key"),
@@ -44,8 +53,13 @@ app.config.update(
     ),
     SQLALCHEMY_TRACK_MODIFICATIONS=False,
     MAX_CONTENT_LENGTH=5 * 1024 * 1024,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=env_flag("SESSION_COOKIE_SECURE", False),
+    PREFERRED_URL_SCHEME=os.environ.get("PREFERRED_URL_SCHEME", "http"),
 )
-DEMO_MODE = os.environ.get("DEMO_MODE", "True").lower() in {"1", "true", "yes", "on"}
+DEMO_MODE = env_flag("DEMO_MODE", True)
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
 APP_VERSION = "V5"
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
@@ -1329,12 +1343,18 @@ def public_fault():
 
 @app.route("/fault-report/qr.png")
 def fault_qr():
-    target = request.url_root.rstrip("/") + url_for("public_fault")
+    base_url = PUBLIC_BASE_URL or request.url_root.rstrip("/")
+    target = base_url + url_for("public_fault")
     image = qrcode.make(target)
     stream = io.BytesIO()
     image.save(stream, "PNG")
     stream.seek(0)
     return send_file(stream, mimetype="image/png", download_name="fault-report-qr.png")
+
+
+@app.get("/healthz")
+def healthz():
+    return {"status": "ok", "version": APP_VERSION}
 
 
 @app.route("/favicon.ico")
