@@ -67,6 +67,19 @@ V5 采用服务器端完整英文渲染，并保留前端兼容翻译。即使�
 - `DEMO_MODE=False`：关闭演示账户密码自动恢复（生产环境建议关闭）
 - `PUBLIC_BASE_URL`：二维码使用的公网根地址；服务器部署设置为 `https://lwqgraduationproject.cn`
 
+## AI 智能助手
+
+助手的本地预警、关键词路由和只读查询不依赖外部服务；即使外部 API 超时或达到免费用量上限，库存、故障和寿命预警回答仍然可用。外部对话使用 Cloudflare Workers AI，密钥只保存在服务器环境变量中。
+
+```powershell
+$env:AI_PROVIDER = "cloudflare"
+$env:CLOUDFLARE_ACCOUNT_ID = "你的 Cloudflare Account ID"
+$env:CLOUDFLARE_API_TOKEN = "具有 Workers AI Read/Edit 权限的令牌"
+$env:CLOUDFLARE_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct"
+```
+
+助手只允许调用 `get_low_stock`、`get_faults` 和 `get_lifecycle_alerts` 三个只读函数，不具备新增、修改、审批或删除权限。不要把 API Token 写入 HTML、JavaScript、Git 仓库或聊天记录。
+
 局域网演示可执行：
 
 ```powershell

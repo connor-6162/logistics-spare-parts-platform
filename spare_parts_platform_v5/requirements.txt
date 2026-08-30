@@ -4,4 +4,5 @@ Flask-Login==0.6.3
 Werkzeug==3.1.6
 qrcode==8.2
 Pillow==12.3.0
+requests==2.32.5
 waitress==3.0.2
