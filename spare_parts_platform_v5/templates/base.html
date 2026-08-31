@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}备品备件数字化管理平台{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v='20260831ai') }}">
 </head>
 <body>
 <div class="app-shell">
@@ -42,7 +42,7 @@
   </main>
 </div>
 <script>window.PAGE_TRANSLATIONS = {{ translations|tojson }};</script>
-<script src="{{ url_for('static', filename='app.js', v='5') }}"></script>
+<script src="{{ url_for('static', filename='app.js', v='20260831ai') }}"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>
