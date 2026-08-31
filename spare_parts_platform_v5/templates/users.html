@@ -1,3 +1,4 @@
+{# 用户与权限：管理员审核注册申请、分配七类角色并管理账户启停。 #}
 {% extends 'base.html' %}{% block title %}用户与权限{% endblock %}{% block page_title %}用户与权限{% endblock %}{% block content %}
 <div class="page-head"><div><h2>{{ t('账户管理') }}</h2><p>审核注册申请、分配角色并管理账户启停状态</p></div><span class="badge info">{{ users|length }} 个账户</span></div>
 <div class="callout" style="margin-bottom:16px"><strong>DEMO_MODE={{ 'True' if demo_mode else 'False' }}</strong> · 开启时，每次启动都会恢复七个演示账户的角色、启用状态和预设密码，避免旧数据库密码导致无法登录。</div>

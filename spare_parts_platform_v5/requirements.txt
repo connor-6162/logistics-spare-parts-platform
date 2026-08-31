@@ -1,8 +1,11 @@
+# Web 框架、数据库 ORM 与登录会话
 Flask==3.1.3
 Flask-SQLAlchemy==3.1.1
 Flask-Login==0.6.3
 Werkzeug==3.1.6
+# 二维码和图像生成，用于手机扫码故障提报
 qrcode==8.2
 Pillow==12.3.0
+# 外部 AI API 请求和 Windows 生产 WSGI 服务
 requests==2.32.5
 waitress==3.0.2

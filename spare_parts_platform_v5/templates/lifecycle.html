@@ -1,3 +1,4 @@
+{# 寿命预警：显示单件服役进度，并执行三级预警、更换和延期管控。 #}
 {% extends 'base.html' %}{% block title %}寿命预警{% endblock %}{% block page_title %}寿命预警与分级管控{% endblock %}{% block content %}
 <div class="page-head"><div><h2>在用备件寿命档案</h2><p>一级：剩余 20% 纳入月维保；二级：剩余 10% 纳入周维保；三级：到期立即更换</p></div>{% if can('export_data') %}<a class="btn btn-ghost" href="{{ url_for('export_csv', kind='warnings') }}">导出预警报表</a>{% endif %}</div>
 <div class="callout" style="margin-bottom:15px"><strong>分级更换规则：</strong>安全核心件到期强制更换；生产核心件和普通非核心件经现场判断后可申请延期，系统自动重算预警日期。</div>

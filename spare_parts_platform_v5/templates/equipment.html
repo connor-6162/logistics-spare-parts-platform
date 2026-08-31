@@ -1,3 +1,4 @@
+{# 设备主数据：按分拣线、设备类型和故障部位建立统一设备台账。 #}
 {% extends 'base.html' %}{% block title %}设备基础信息{% endblock %}{% block page_title %}设备基础信息{% endblock %}{% block content %}
 <div class="page-head"><div><h2>设备电子台账</h2><p>按分拣线、设备类型和故障部位建立统一索引</p></div>{% if can('manage_equipment') %}<button class="btn btn-primary" data-modal-open="equipment-modal">＋ 新增设备</button>{% endif %}</div>
 <div class="grid grid-3">{% for item in equipment %}<div class="card card-body"><div style="display:flex;justify-content:space-between;gap:12px"><div><div class="cell-sub">{{ item.line_name }}</div><h3 style="margin:7px 0">{{ item.device_type }}</h3><div>故障部位：{{ item.location }}</div></div><span class="badge {{ item.status }}">{{ item.status }}</span></div></div>{% endfor %}</div>

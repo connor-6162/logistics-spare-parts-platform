@@ -1,3 +1,4 @@
+{# 废弃件管理：显示旧件残值和修复性，并提交回库、复用或报废决策。 #}
 {% extends 'base.html' %}{% block title %}废弃件管理{% endblock %}{% block page_title %}废弃件管理{% endblock %}{% block content %}
 <div class="page-head"><div><h2>旧件鉴定与逆向物流</h2><p>领用出库自动带入旧件，按可复用性和残值形成处置闭环</p></div></div>
 <div class="grid grid-4" style="margin-bottom:17px">{% for status in ['待鉴定','待二次使用','待残值处置','已报废'] %}<div class="card metric-card"><div class="metric-label">{{ status }}</div><div class="metric-value">{{ items|selectattr('status','equalto',status)|list|length }}</div></div>{% endfor %}</div>

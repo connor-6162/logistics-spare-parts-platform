@@ -1,4 +1,13 @@
+/**
+ * 全站前端增强脚本。
+ *
+ * 页面核心内容由 Flask/Jinja2 在服务器端生成；本文件只负责无需刷新页面的增强交互：
+ * 英文文本兜底翻译、弹窗、移动菜单、确认框、表单联动、密码显示、演示账户登录，
+ * 以及右侧 AI 助手的预警刷新和异步问答。即使 JavaScript 不可用，主要业务页面仍可阅读。
+ */
 document.addEventListener("DOMContentLoaded", () => {
+  // ---------- 1. 英文模式兜底翻译 ----------
+  // 服务端已完成主要翻译；这里继续处理浏览器中动态生成的文本和可见属性。
   const dictionary = window.PAGE_TRANSLATIONS || {};
   if (Object.keys(dictionary).length) {
     const orderedTranslations = Object.entries(dictionary).sort((a, b) => b[0].length - a[0].length);
@@ -27,6 +36,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     document.title = translateString(document.title);
   }
+  // ---------- 2. 通用弹窗、移动导航和危险操作确认 ----------
   document.querySelectorAll("[data-modal-open]").forEach((button) => {
     button.addEventListener("click", () => document.getElementById(button.dataset.modalOpen)?.classList.add("open"));
   });
@@ -41,6 +51,8 @@ document.addEventListener("DOMContentLoaded", () => {
     form.addEventListener("submit", (event) => { if (!window.confirm(form.dataset.confirm)) event.preventDefault(); });
   });
   document.querySelectorAll(".flash").forEach((item) => setTimeout(() => item.remove(), 4200));
+  // ---------- 3. 业务表单联动 ----------
+  // 选择备件后，把选项 data-* 中的规格、货位、库存等信息填入同一表单。
   document.querySelectorAll("[data-part-select]").forEach((select) => {
     const update = () => {
       const option = select.selectedOptions[0];
@@ -53,6 +65,7 @@ document.addEventListener("DOMContentLoaded", () => {
     };
     select.addEventListener("change", update); update();
   });
+  // 只有确认换件时才展示领用备件区域，减少无关字段。
   document.querySelectorAll("[data-replacement-select]").forEach((select) => {
     const update = () => {
       const target = document.getElementById(select.dataset.replacementSelect);
@@ -60,6 +73,8 @@ document.addEventListener("DOMContentLoaded", () => {
     };
     select.addEventListener("change", update); update();
   });
+  // ---------- 4. 登录页辅助功能 ----------
+  // 切换 password/text 类型实现显示密码，并同步无障碍标签。
   document.querySelector("[data-toggle-password]")?.addEventListener("click", (event) => {
     const button = event.currentTarget;
     const input = document.querySelector("[data-login-password]");
@@ -70,6 +85,7 @@ document.addEventListener("DOMContentLoaded", () => {
     button.setAttribute("aria-label", button.textContent);
     input.focus();
   });
+  // 演示账户按钮只填充当前表单并正常提交，认证仍由服务器完成。
   document.querySelectorAll("[data-demo-login]").forEach((button) => {
     button.addEventListener("click", () => {
       const form = document.querySelector("[data-login-form]");
@@ -82,12 +98,15 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
+  // ---------- 5. AI 助手面板 ----------
+  // data-* 属性由 base.html 注入接口地址、CSRF 令牌和中英文提示。
   const assistantLayer = document.querySelector("[data-assistant-layer]");
   const assistantPanel = assistantLayer?.querySelector(".assistant-panel");
   const assistantMessages = assistantLayer?.querySelector("[data-assistant-messages]");
   const assistantForm = assistantLayer?.querySelector("[data-assistant-form]");
   const assistantInput = assistantLayer?.querySelector("[data-assistant-input]");
   const assistantSend = assistantLayer?.querySelector("[data-assistant-send]");
+  // 将用户/助手消息安全写入 textContent，避免把模型输出当作 HTML 执行。
   const appendAssistantMessage = (text, kind, source = "") => {
     if (!assistantMessages) return null;
     const wrapper = document.createElement("div");
@@ -104,6 +123,7 @@ document.addEventListener("DOMContentLoaded", () => {
     assistantMessages.scrollTop = assistantMessages.scrollHeight;
     return wrapper;
   };
+  // 用服务器返回的只读统计刷新缺货、故障、寿命和总预警数量。
   const updateAssistantSnapshot = (snapshot) => {
     if (!snapshot) return;
     const fields = [
@@ -118,6 +138,7 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     });
   };
+  // 异步刷新失败时保留服务端首屏数字，不影响用户继续操作。
   const refreshAssistantAlerts = async () => {
     if (!assistantPanel?.dataset.alertsUrl) return;
     try {
@@ -128,9 +149,10 @@ document.addEventListener("DOMContentLoaded", () => {
       const payload = await response.json();
       updateAssistantSnapshot(payload.snapshot);
     } catch (_error) {
-      // Server-rendered alert counts remain available when refresh is unavailable.
+      // 刷新不可用时仍保留服务端已经渲染的预警数量。
     }
   };
+  // 打开/关闭侧滑面板，并控制焦点和页面滚动。
   const openAssistant = () => {
     if (!assistantLayer) return;
     assistantLayer.classList.add("open");
@@ -163,6 +185,8 @@ document.addEventListener("DOMContentLoaded", () => {
       assistantForm?.requestSubmit();
     }
   });
+  // ---------- 6. AI 问答请求 ----------
+  // JSON 请求携带同源凭据和 CSRF；服务器决定使用本地答案还是外部 API。
   assistantForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const message = assistantInput?.value.trim();

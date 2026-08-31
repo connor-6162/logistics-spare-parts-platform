@@ -1,3 +1,4 @@
+{# 数据驾驶舱：聚合库存、采购、寿命、故障、活动日志、二维码和快捷入口。 #}
 {% extends 'base.html' %}{% block title %}数据驾驶舱 - 备件智管平台{% endblock %}{% block page_title %}数据驾驶舱{% endblock %}
 {% block content %}
 <div class="page-head"><div><h2>{{ t('运营总览') }}</h2><p>{{ t('实时掌握库存健康度、采购进度和备件寿命风险') }}</p></div><div class="actions dashboard-actions"><button class="ai-assistant-card" type="button" data-assistant-open><span class="ai-orb">AI</span><span class="ai-card-copy"><strong>{{ t('AI 智能助手') }}</strong><small>{{ t('提前预警 · 只读查询 · 智能问答') }}</small></span><span class="ai-alert-total" data-assistant-total>{{ assistant_summary.total }}</span></button>{% if can('export_data') %}<a class="btn btn-ghost" href="{{ url_for('export_csv', kind='stock') }}">{{ t('导出库存') }}</a>{% endif %}{% if can('report_fault') %}<a class="btn btn-primary" href="{{ url_for('faults') }}">{{ t('快速故障提报') }}</a>{% endif %}</div></div>

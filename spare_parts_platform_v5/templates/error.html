@@ -1,1 +1,2 @@
+{# 统一错误页面：由 403/404 处理器传入状态码和友好提示，不暴露内部异常。 #}
 {% extends 'base.html' %}{% block title %}{{ code }}{% endblock %}{% block page_title %}访问提示{% endblock %}{% block content %}<div class="card card-body" style="max-width:560px;margin:10vh auto;text-align:center;padding:48px"><div style="font-size:62px;font-weight:800;color:var(--primary)">{{ code }}</div><h2>{{ message }}</h2><p class="cell-sub">您可以返回数据驾驶舱继续操作。</p><a class="btn btn-primary" href="{{ url_for('dashboard') }}">返回首页</a></div>{% endblock %}

@@ -1,12 +1,17 @@
 #Requires -RunAsAdministrator
+# Windows 正式安装/更新脚本。
+# 主要步骤：选择磁盘→复制应用→安装 Python/虚拟环境→创建或保留生产配置→
+# 注册开机计划任务→启动应用→轮询 /healthz 验证部署成功。
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
+# 源目录来自下载仓库；应用与数据分离，更新代码时不会覆盖数据库。
 $SourceRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $AppRoot = "D:\SparePartsPlatform"
 $DataRoot = "D:\SparePartsData"
 
+# 优先使用数据盘 D:；没有数据盘的服务器自动回退到系统盘 C:。
 if (-not (Test-Path -LiteralPath "D:\")) {
     $AppRoot = "C:\SparePartsPlatform"
     $DataRoot = "C:\SparePartsData"
@@ -16,6 +21,7 @@ New-Item -ItemType Directory -Path $AppRoot -Force | Out-Null
 New-Item -ItemType Directory -Path $DataRoot -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $DataRoot "logs") -Force | Out-Null
 
+# robocopy 只同步程序，明确排除数据库、生产密钥和虚拟环境。
 $RoboCopyArgs = @(
     $SourceRoot,
     $AppRoot,
@@ -30,6 +36,7 @@ if ($LASTEXITCODE -ge 8) {
     throw "Copying the application failed with robocopy exit code $LASTEXITCODE."
 }
 
+# 先复用已安装的 Python；找不到时静默安装经过固定版本的 Python 3.11。
 $PythonExe = $null
 $PythonCandidates = @(
     "C:\Python311\python.exe",
@@ -53,6 +60,7 @@ if (-not $PythonExe) {
     $PythonExe = "C:\Python311\python.exe"
 }
 
+# 独立虚拟环境隔离系统 Python，requirements.txt 固定应用依赖。
 $VenvPython = Join-Path $AppRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path -LiteralPath $VenvPython)) {
     & $PythonExe -m venv (Join-Path $AppRoot ".venv")
@@ -61,6 +69,7 @@ if (-not (Test-Path -LiteralPath $VenvPython)) {
 & $VenvPython -m pip install --upgrade pip
 & $VenvPython -m pip install -r (Join-Path $AppRoot "requirements.txt")
 
+# 首次安装生成随机 SECRET_KEY；更新时绝不覆盖现有数据库地址、令牌和密钥。
 $ConfigPath = Join-Path $AppRoot "deployment\windows\production.env.ps1"
 if (-not (Test-Path -LiteralPath $ConfigPath)) {
     $SecretBytes = New-Object byte[] 48
@@ -86,8 +95,7 @@ if (-not (Test-Path -LiteralPath $ConfigPath)) {
 "@
     Set-Content -LiteralPath $ConfigPath -Value $Config -Encoding UTF8
 } else {
-    # Never overwrite production secrets during an application update. Only migrate
-    # the deprecated model name while preserving the API token and session key.
+    # 更新只迁移已停用的模型名称，保留生产 API 令牌和会话密钥。
     $ExistingConfig = Get-Content -LiteralPath $ConfigPath -Raw
     $ExistingConfig = $ExistingConfig.Replace(
         '@cf/meta/llama-3.1-8b-instruct''',
@@ -97,6 +105,7 @@ if (-not (Test-Path -LiteralPath $ConfigPath)) {
     Write-Host "Existing production configuration and secrets were preserved." -ForegroundColor Cyan
 }
 
+# 停止旧计划任务和属于本应用的残留监听进程，避免端口 5055/80 冲突。
 $StartScript = Join-Path $AppRoot "deployment\windows\start_server.ps1"
 $PowerShellExe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
 $ExistingTask = Get-ScheduledTask -TaskName "SparePartsPlatform" -ErrorAction SilentlyContinue
@@ -115,6 +124,7 @@ foreach ($Port in 5055, 80) {
 }
 Start-Sleep -Seconds 2
 
+# SYSTEM 计划任务随 Windows 启动，并在异常退出后最多自动重试五次。
 $Action = New-ScheduledTaskAction -Execute $PowerShellExe -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$StartScript`""
 $Trigger = New-ScheduledTaskTrigger -AtStartup
 $Principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
@@ -122,6 +132,7 @@ $Settings = New-ScheduledTaskSettingsSet -RestartCount 5 -RestartInterval (New-T
 Register-ScheduledTask -TaskName "SparePartsPlatform" -Action $Action -Trigger $Trigger -Principal $Principal -Settings $Settings -Force | Out-Null
 Start-ScheduledTask -TaskName "SparePartsPlatform"
 
+# 最长等待 90 秒；只有本机健康接口明确返回 status=ok 才判定安装成功。
 $Ready = $false
 for ($Attempt = 1; $Attempt -le 90; $Attempt++) {
     Start-Sleep -Seconds 1

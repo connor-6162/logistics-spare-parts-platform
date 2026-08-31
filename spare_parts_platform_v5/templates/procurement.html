@@ -1,3 +1,4 @@
+{# 采购比价：展示安全库存触发的需求、供应商报价、审批和补货建议。 #}
 {% extends 'base.html' %}{% block title %}采购比价{% endblock %}{% block page_title %}采购比价{% endblock %}{% block content %}
 <div class="page-head"><div><h2>采购寻源与智能询比</h2><p>库存预警主动发起需求，结合多家报价生成参考价格区间</p></div>{% if can('create_procurement') %}<div class="actions"><form method="post" action="{{ url_for('generate_procurement') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn btn-warning">⚡ 智能生成补货</button></form><button class="btn btn-primary" data-modal-open="proc-modal">＋ 发起采购</button></div>{% endif %}</div>
 <div class="callout" style="margin-bottom:15px"><strong>预测性采购触发：</strong>{{ t('系统按“实时库存 < 最小库存”识别风险，并建议补足到最大库存；已有待审批或已批准申请时不会重复生成。') }}</div>

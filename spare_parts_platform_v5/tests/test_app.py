@@ -1,3 +1,10 @@
+"""平台自动化回归测试。
+
+测试使用临时 SQLite 数据库和 Flask 测试客户端，不连接生产数据库。覆盖范围包括：
+登录与注册审批、七角色权限、端到端采购/入库/领用流程、中英文完整翻译、
+二维码公开报修，以及 AI 助手的只读函数、外部 API 成功/失败回退和提示回显过滤。
+"""
+
 from __future__ import annotations
 
 import importlib
@@ -12,6 +19,7 @@ from unittest.mock import Mock, patch
 
 
 class UserFacingTextParser(HTMLParser):
+    """提取页面上用户真正可见的文本和属性，用于检查英文页面是否残留中文。"""
     translated_attributes = {
         "placeholder", "aria-label", "title", "alt", "data-confirm",
         "data-show-label", "data-hide-label",
@@ -39,8 +47,10 @@ class UserFacingTextParser(HTMLParser):
 
 
 class PlatformFlowTest(unittest.TestCase):
+    """在隔离数据库中验证主要页面、权限边界和跨模块业务状态。"""
     @classmethod
     def setUpClass(cls):
+        """整个测试类只导入一次应用，并把数据库指向临时文件。"""
         cls.temp_dir = tempfile.TemporaryDirectory()
         db_path = (Path(cls.temp_dir.name) / "test.db").as_posix()
         os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
@@ -60,16 +70,19 @@ class PlatformFlowTest(unittest.TestCase):
         cls.temp_dir.cleanup()
 
     def setUp(self):
+        """每个测试创建独立客户端并默认以管理员身份登录。"""
         self.client = self.app.test_client()
         self.client.get("/login")
         self.login()
 
     def token(self, client=None):
+        """从测试会话读取 CSRF 令牌，模拟浏览器的合法修改请求。"""
         client = client or self.client
         with client.session_transaction() as sess:
             return sess["csrf_token"]
 
     def login(self, username="admin", password="Admin123!", client=None):
+        """复用登录步骤，并断言登录后确实进入驾驶舱。"""
         client = client or self.client
         response = client.post(
             "/login",

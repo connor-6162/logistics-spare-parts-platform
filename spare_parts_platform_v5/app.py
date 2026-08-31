@@ -1,3 +1,17 @@
+"""备品备件全生命周期管理平台的主应用模块。
+
+本文件集中实现以下功能：
+1. Flask 应用、数据库、登录会话和安全参数初始化；
+2. 七类岗位角色及服务器端权限控制；
+3. 设备、备件、采购、库存、故障、寿命和处置等数据模型；
+4. 中英文翻译、二维码报修、CSV 导出和审计日志；
+5. 只读优先的 AI 助手，以及 Cloudflare AI 失败时的本地回退；
+6. 演示数据初始化和数据库兼容升级。
+
+为了便于教学和毕业设计阅读，业务逻辑按“配置→模型→权限→AI→路由→初始化”
+的顺序组织。生产环境中的密钥和数据库地址均从环境变量读取，不能写死在代码中。
+"""
+
 from __future__ import annotations
 
 import csv
@@ -40,16 +54,20 @@ from sqlalchemy import func, or_, text
 from werkzeug.security import check_password_hash, generate_password_hash
 
 
+# ==================== 1. 应用配置与外部依赖 ====================
+# BASE_DIR 用于定位默认 SQLite 数据库和模板、静态资源所在目录。
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 
 def env_flag(name: str, default: bool = False) -> bool:
+    """把环境变量中的 1/true/yes/on 转换为布尔值。"""
     value = os.environ.get(name)
     if value is None:
         return default
     return value.lower() in {"1", "true", "yes", "on"}
 
 
+# Flask 保存 HTTP 路由和模板上下文；SQLAlchemy 统一管理数据库事务。
 app = Flask(__name__)
 app.config.update(
     SECRET_KEY=os.environ.get("SECRET_KEY", "dev-change-this-key"),
@@ -63,6 +81,7 @@ app.config.update(
     SESSION_COOKIE_SECURE=env_flag("SESSION_COOKIE_SECURE", False),
     PREFERRED_URL_SCHEME=os.environ.get("PREFERRED_URL_SCHEME", "http"),
 )
+# 运行参数均允许在服务器环境变量中覆盖，避免把域名、密钥或令牌提交到 GitHub。
 DEMO_MODE = env_flag("DEMO_MODE", True)
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
 APP_VERSION = "V5"
@@ -72,8 +91,7 @@ AI_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
 AI_MODEL = os.environ.get(
     "CLOUDFLARE_AI_MODEL", "@cf/meta/llama-3.1-8b-instruct-fast"
 ).strip()
-# The original model is deprecated. Keep existing server configuration working while
-# transparently moving it to Cloudflare's maintained fast variant.
+# 旧模型已经停用：这里自动迁移到仍受 Cloudflare 维护的快速模型，兼容旧配置。
 if AI_MODEL == "@cf/meta/llama-3.1-8b-instruct":
     AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast"
 AI_TIMEOUT_SECONDS = max(3, min(int(os.environ.get("AI_TIMEOUT_SECONDS", "12")), 30))
@@ -87,6 +105,8 @@ login_manager.login_view = "login"
 login_manager.login_message = "请先登录后继续操作"
 
 
+# ==================== 2. 角色、权限与演示账户 ====================
+# ROLE_NAMES 保存中英文显示名称；ROLE_PERMISSIONS 决定服务器端允许执行的动作。
 ROLE_NAMES = {
     "admin": ("系统管理员", "System Administrator"),
     "worker": ("一线工人", "Frontline Worker"),
@@ -107,6 +127,7 @@ ROLE_PERMISSIONS = {
     "executive": {"dashboard", "view_equipment", "view_parts", "view_suppliers", "view_procurement", "view_inbound", "view_stock", "view_faults", "view_lifecycle", "view_disposals", "export_data"},
 }
 
+# 演示模式启动时会校正这些账户的密码散列，避免旧数据库造成无法登录。
 DEMO_ACCOUNTS = [
     ("admin", "Admin123!", "系统管理员", "admin", "信息管理部"),
     ("worker", "Worker123!", "一线工人", "worker", "生产运行部"),
@@ -117,6 +138,8 @@ DEMO_ACCOUNTS = [
     ("executive", "Executive123!", "高层领导", "executive", "公司领导"),
 ]
 
+# ==================== 3. 中英文国际化字典 ====================
+# 中文是模板的基础语言；英文模式按“完整文本优先、短文本后处理”的顺序替换。
 EN_TRANSLATIONS = {
     "备件智管平台": "Spare Parts Hub", "数据驾驶舱": "Dashboard", "设备基础信息": "Equipment",
     "备件基础信息": "Spare Parts", "供应商管理": "Suppliers", "采购比价": "Procurement & Quotes",
@@ -519,6 +542,7 @@ EN_TRANSLATIONS.update({
 })
 
 
+# 长文本排在前面，防止短词先替换后破坏较长语句的匹配。
 TRANSLATION_ITEMS = tuple(sorted(EN_TRANSLATIONS.items(), key=lambda item: len(item[0]), reverse=True))
 EN_TRANSLATIONS.update({
     "AI 智能助手": "AI Assistant",
@@ -558,6 +582,7 @@ HTML_TOKEN_RE = re.compile(
 
 
 def translate_english_text(value):
+    """把一段用户可见中文翻译为英文，同时保留原有前后空白。"""
     """Translate known Chinese UI fragments while preserving surrounding content."""
     if value is None:
         return value
@@ -573,6 +598,7 @@ def translate_english_text(value):
 
 
 def translate_english_html(document):
+    """扫描 HTML 文本节点和可见属性，补齐模板中动态生成内容的英文翻译。"""
     """Translate user-facing HTML without changing form values, URLs or scripts."""
     def translate_attribute(match):
         value = translate_english_text(match.group("value"))
@@ -592,16 +618,21 @@ def translate_english_html(document):
 
 
 def now() -> datetime:
+    """统一返回不带时区的本地时间，供业务记录和审计字段使用。"""
     return datetime.now().replace(microsecond=0)
 
 
 def next_number(prefix: str, model) -> str:
+    """依据当天日期和当日记录数生成易读、可追踪的业务单号。"""
     today = date.today().strftime("%Y%m%d")
     count = model.query.filter(model.number.like(f"{prefix}-{today}-%")).count() + 1
     return f"{prefix}-{today}-{count:04d}"
 
 
+# ==================== 4. 数据模型：一物一码全生命周期 ====================
+# 每个模型对应一类业务表；库存变化通过事务模型留痕，不直接丢失历史。
 class User(UserMixin, db.Model):
+    """平台用户：保存密码散列、岗位角色、部门、审批和启停状态。"""
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
@@ -618,6 +649,7 @@ class User(UserMixin, db.Model):
 
 
 class Equipment(db.Model):
+    """物流设备主数据：记录分拣线、设备类型、部位和运行状态。"""
     id = db.Column(db.Integer, primary_key=True)
     line_name = db.Column(db.String(80), nullable=False)
     device_type = db.Column(db.String(80), nullable=False)
@@ -630,6 +662,7 @@ class Equipment(db.Model):
 
 
 class Supplier(db.Model):
+    """供应商主数据：记录联系方式、合作状态和有效期。"""
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), unique=True, nullable=False)
     contact = db.Column(db.String(80), default="")
@@ -640,6 +673,7 @@ class Supplier(db.Model):
 
 
 class Part(db.Model):
+    """备件主数据：唯一编码、规格、货位、实时库存及安全上下限。"""
     id = db.Column(db.Integer, primary_key=True)
     code = db.Column(db.String(80), unique=True, nullable=False)
     part_type = db.Column(db.String(50), nullable=False)
@@ -665,6 +699,7 @@ class Part(db.Model):
 
 
 class Procurement(db.Model):
+    """采购需求与比价记录：保存报价、供应商、审批状态和采购数量。"""
     id = db.Column(db.Integer, primary_key=True)
     number = db.Column(db.String(40), unique=True, nullable=False)
     part_id = db.Column(db.Integer, db.ForeignKey("part.id"), nullable=False)
@@ -690,6 +725,7 @@ class Procurement(db.Model):
 
 
 class Inbound(db.Model):
+    """登记入库单：保存到货批次、数量、单价和经办信息。"""
     id = db.Column(db.Integer, primary_key=True)
     number = db.Column(db.String(40), unique=True, nullable=False)
     part_id = db.Column(db.Integer, db.ForeignKey("part.id"), nullable=False)
@@ -709,6 +745,7 @@ class Inbound(db.Model):
 
 
 class InventoryTransaction(db.Model):
+    """库存流水：记录每次增加/扣减的来源、数量及发生时间。"""
     id = db.Column(db.Integer, primary_key=True)
     part_id = db.Column(db.Integer, db.ForeignKey("part.id"), nullable=False)
     movement = db.Column(db.String(30), nullable=False)
@@ -721,6 +758,7 @@ class InventoryTransaction(db.Model):
 
 
 class Stocktake(db.Model):
+    """盘点记录：比较账面库存与实盘数量，并保存差异和纠正结果。"""
     id = db.Column(db.Integer, primary_key=True)
     number = db.Column(db.String(40), unique=True, nullable=False)
     part_id = db.Column(db.Integer, db.ForeignKey("part.id"), nullable=False)
@@ -736,6 +774,7 @@ class Stocktake(db.Model):
 
 
 class FaultReport(db.Model):
+    """设备故障工单：承接后台录入和二维码公开报修。"""
     id = db.Column(db.Integer, primary_key=True)
     number = db.Column(db.String(40), unique=True, nullable=False)
     equipment_id = db.Column(db.Integer, db.ForeignKey("equipment.id"), nullable=False)
@@ -752,6 +791,7 @@ class FaultReport(db.Model):
 
 
 class Withdrawal(db.Model):
+    """维修领用出库：关联故障、备件、领用数量与领用后库存。"""
     id = db.Column(db.Integer, primary_key=True)
     number = db.Column(db.String(40), unique=True, nullable=False)
     fault_id = db.Column(db.Integer, db.ForeignKey("fault_report.id"), nullable=False)
@@ -765,6 +805,7 @@ class Withdrawal(db.Model):
 
 
 class Lifecycle(db.Model):
+    """单件备件寿命记录：依据安装日期和设计寿命计算三级预警。"""
     id = db.Column(db.Integer, primary_key=True)
     serial_number = db.Column(db.String(50), unique=True, nullable=False)
     part_id = db.Column(db.Integer, db.ForeignKey("part.id"), nullable=False)
@@ -815,6 +856,7 @@ class Lifecycle(db.Model):
 
 
 class Disposal(db.Model):
+    """废弃件处置记录：区分修复回库、二次使用和审批报废。"""
     id = db.Column(db.Integer, primary_key=True)
     withdrawal_id = db.Column(db.Integer, db.ForeignKey("withdrawal.id"), nullable=False)
     part_id = db.Column(db.Integer, db.ForeignKey("part.id"), nullable=False)
@@ -829,6 +871,7 @@ class Disposal(db.Model):
 
 
 class AuditLog(db.Model):
+    """审计日志：追加保存用户、动作、详情和时间，支持责任追溯。"""
     id = db.Column(db.Integer, primary_key=True)
     user_name = db.Column(db.String(50), nullable=False)
     action = db.Column(db.String(80), nullable=False)
@@ -838,15 +881,18 @@ class AuditLog(db.Model):
 
 @login_manager.user_loader
 def load_user(user_id):
+    """Flask-Login 根据会话中的用户编号恢复当前登录用户。"""
     return db.session.get(User, int(user_id))
 
 
 def audit(action: str, detail: str):
+    """把关键业务动作追加到审计表，提交由调用方所在事务统一完成。"""
     name = current_user.display_name if current_user.is_authenticated else "外部用户"
     db.session.add(AuditLog(user_name=name, action=action, detail=detail))
 
 
 def has_permission(permission: str, user=None) -> bool:
+    """检查用户角色是否拥有指定权限；管理员的 * 表示全部权限。"""
     user = user or current_user
     if not getattr(user, "is_authenticated", False):
         return False
@@ -855,6 +901,7 @@ def has_permission(permission: str, user=None) -> bool:
 
 
 def permission_required(permission):
+    """路由装饰器：未登录先跳转登录，已登录但无权限则返回 403。"""
     def decorator(view):
         @wraps(view)
         def wrapped(*args, **kwargs):
@@ -870,11 +917,15 @@ def permission_required(permission):
 
 
 def require_permission(permission):
+    """在普通函数内部执行权限检查，常用于 AI 只读工具。"""
     if not has_permission(permission):
         abort(403)
 
 
+# ==================== 5. AI 助手的只读业务工具 ====================
+# AI 不直接执行 SQL 或写操作，只能调用以下受权限保护的结构化查询函数。
 def get_low_stock(user=None, limit: int = 8) -> dict:
+    """返回低于最低库存的备件及建议补货量，供预警卡片和问答使用。"""
     """Return a permission-filtered, read-only snapshot of parts below minimum stock."""
     user = user or current_user
     if not (has_permission("view_parts", user) or has_permission("view_stock", user)):
@@ -905,6 +956,7 @@ def get_low_stock(user=None, limit: int = 8) -> dict:
 
 
 def get_inventory(user=None, limit: int = 50) -> dict:
+    """返回授权范围内的库存总览和备件明细，不修改任何库存记录。"""
     """Return the complete permission-filtered inventory snapshot without write access."""
     user = user or current_user
     if not (has_permission("view_parts", user) or has_permission("view_stock", user)):
@@ -934,6 +986,7 @@ def get_inventory(user=None, limit: int = 50) -> dict:
 
 
 def get_faults(user=None, limit: int = 8) -> dict:
+    """返回待处理/处理中的故障摘要，并遵守当前角色的查看权限。"""
     """Return open fault work orders without reporter contact details or write capability."""
     user = user or current_user
     if not has_permission("view_faults", user):
@@ -961,6 +1014,7 @@ def get_faults(user=None, limit: int = 8) -> dict:
 
 
 def get_lifecycle_alerts(user=None, limit: int = 8) -> dict:
+    """返回一级、二级、三级寿命预警及其备件信息。"""
     """Return active lifecycle alerts as a read-only, role-filtered snapshot."""
     user = user or current_user
     if not has_permission("view_lifecycle", user):
@@ -996,6 +1050,7 @@ def get_lifecycle_alerts(user=None, limit: int = 8) -> dict:
 
 
 def select_assistant_tools(question: str) -> list[str]:
+    """通过关键词和意图把问题路由到有限的只读函数集合。"""
     """Select only whitelisted read-only tools from Chinese or English keywords."""
     normalized = unicodedata.normalize("NFKC", question).lower()
     overview_keywords = (
@@ -1025,6 +1080,7 @@ def select_assistant_tools(question: str) -> list[str]:
 
 
 def run_assistant_tools(question: str, user=None) -> list[dict]:
+    """执行已选择的只读函数，并把权限允许的结果组合为工具结果列表。"""
     user = user or current_user
     functions = {
         "get_low_stock": get_low_stock,
@@ -1041,6 +1097,7 @@ def run_assistant_tools(question: str, user=None) -> list[dict]:
 
 
 def assistant_snapshot(user=None) -> dict:
+    """聚合缺货、故障和寿命风险数量，供驾驶舱 AI 卡片主动提醒。"""
     user = user or current_user
     results = [
         get_low_stock(user=user, limit=5),
@@ -1058,6 +1115,7 @@ def assistant_snapshot(user=None) -> dict:
 
 
 def local_assistant_answer(tool_results: list[dict], language: str) -> str:
+    """把结构化结果整理成自然语言；外部 API 不可用时仍能正常回答。"""
     if not tool_results:
         if language == "en":
             return "I can check low stock, open fault work orders and lifecycle alerts. Try asking: ‘Summarize the current risks.’"
@@ -1127,6 +1185,7 @@ def local_assistant_answer(tool_results: list[dict], language: str) -> str:
 
 
 def requires_exact_system_answer(question: str, tool_results: list[dict]) -> bool:
+    """判断问题是否要求精确系统事实；精确问题禁止交给外部模型改写。"""
     """Prefer deterministic prose when a user explicitly asks for complete/raw figures."""
     if not tool_results:
         return False
@@ -1139,6 +1198,7 @@ def requires_exact_system_answer(question: str, tool_results: list[dict]) -> boo
 
 
 def clean_ai_answer(answer: str, question: str) -> str | None:
+    """过滤提示词回显、异常重复、空内容等不合格的大模型输出。"""
     """Reject prompt echoes, raw tool JSON and repetition before content reaches the UI."""
     if not isinstance(answer, str):
         return None
@@ -1179,6 +1239,7 @@ def clean_ai_answer(answer: str, question: str) -> str | None:
 
 
 def cloudflare_ai_answer(question: str, tool_results: list[dict], language: str) -> str | None:
+    """调用 Cloudflare Workers AI 进行语言润色；超时或异常时返回 None。"""
     if AI_PROVIDER != "cloudflare" or not AI_ACCOUNT_ID or not AI_API_TOKEN:
         return None
     language_instruction = "Use natural, concise English." if language == "en" else "只使用自然、简洁、礼貌的中文。"
@@ -1228,6 +1289,7 @@ def cloudflare_ai_answer(question: str, tool_results: list[dict], language: str)
 
 
 def consume_ai_request_slot(user_id: int) -> bool:
+    """使用内存滑动窗口限制每名用户每分钟的外部 AI 请求次数。"""
     cutoff = time.monotonic() - 60
     with _AI_RATE_LOCK:
         request_times = _AI_REQUEST_TIMES[user_id]
@@ -1240,6 +1302,7 @@ def consume_ai_request_slot(user_id: int) -> bool:
 
 
 def admin_required(view):
+    """仅允许管理员访问的简化装饰器，用于用户审批和权限配置。"""
     @wraps(view)
     def wrapped(*args, **kwargs):
         if not current_user.is_authenticated:
@@ -1251,8 +1314,10 @@ def admin_required(view):
     return wrapped
 
 
+# ==================== 6. 请求级安全、翻译与模板公共数据 ====================
 @app.before_request
 def csrf_protect():
+    """校验所有修改请求的 CSRF 令牌，阻止第三方页面伪造表单提交。"""
     if "csrf_token" not in session:
         session["csrf_token"] = secrets.token_hex(16)
     if request.method == "POST":
@@ -1263,6 +1328,7 @@ def csrf_protect():
 
 @app.after_request
 def translate_english_response(response):
+    """英文会话下对最终 HTML 再翻译一次，覆盖数据库动态文本。"""
     """Render English UI on the server so browser cache or JavaScript cannot cause fallback text."""
     if response.mimetype == "text/html":
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
@@ -1274,6 +1340,7 @@ def translate_english_response(response):
 
 @app.context_processor
 def inject_globals():
+    """向所有模板注入导航权限、角色名称、日期、CSRF 和翻译数据。"""
     current_lang = session.get("lang", "zh")
 
     def translate(value):
@@ -1300,16 +1367,20 @@ def inject_globals():
 
 @app.template_filter("datetime")
 def format_datetime(value):
+    """模板过滤器：把日期时间统一显示为年月日时分。"""
     return value.strftime("%Y-%m-%d %H:%M") if value else "-"
 
 
 @app.template_filter("money")
 def format_money(value):
+    """模板过滤器：金额统一保留两位小数。"""
     return f"¥{float(value or 0):,.2f}"
 
 
+# ==================== 7. 身份认证、注册审批与语言切换 ====================
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    """处理登录、输入规范化、审批状态检查和密码散列验证。"""
     if current_user.is_authenticated:
         return redirect(url_for("dashboard"))
     if request.method == "POST":
@@ -1340,6 +1411,7 @@ def login():
 
 @app.route("/language/<lang>")
 def set_language(lang):
+    """把 zh/en 写入会话，然后返回原页面。"""
     if lang not in {"zh", "en"}:
         abort(404)
     session["lang"] = lang
@@ -1354,6 +1426,7 @@ def set_language(lang):
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
+    """创建待管理员审批的新账户，不允许注册后直接获得业务权限。"""
     if current_user.is_authenticated:
         return redirect(url_for("dashboard"))
     public_roles = {key: value for key, value in ROLE_NAMES.items() if key != "admin"}
@@ -1393,12 +1466,14 @@ def register():
 @app.route("/users")
 @admin_required
 def users():
+    """管理员查看全部账户和待审批用户。"""
     return render_template("users.html", users=User.query.order_by(User.created_at.desc()).all(), roles=ROLE_NAMES)
 
 
 @app.route("/users/<int:user_id>/update", methods=["POST"])
 @admin_required
 def update_user(user_id):
+    """管理员更新用户角色、启停状态和审批结果。"""
     user = db.get_or_404(User, user_id)
     role = request.form.get("role", user.role)
     if role not in ROLE_NAMES:
@@ -1417,15 +1492,18 @@ def update_user(user_id):
 @app.route("/logout", methods=["POST"])
 @login_required
 def logout():
+    """通过 POST 注销会话，避免跨站点链接直接触发退出。"""
     logout_user()
     flash("已安全退出", "success")
     return redirect(url_for("login"))
 
 
+# ==================== 8. 驾驶舱与主数据 ====================
 @app.route("/")
 @login_required
 @permission_required("dashboard")
 def dashboard():
+    """聚合库存、采购、故障、寿命和审计指标，渲染运营驾驶舱。"""
     parts = Part.query.order_by(Part.stock.asc()).all()
     lifecycles = Lifecycle.query.filter_by(status="使用中").all()
     warnings = [item for item in lifecycles if item.warning_level != "正常"]
@@ -1456,6 +1534,7 @@ def dashboard():
 @login_required
 @permission_required("view_parts")
 def parts():
+    """查询或新增备件主数据，并校验唯一编码和库存上下限。"""
     if request.method == "POST":
         require_permission("manage_parts")
         part_type = request.form["part_type"].strip()
@@ -1497,6 +1576,7 @@ def parts():
 @login_required
 @permission_required("view_suppliers")
 def suppliers():
+    """查询或新增供应商，保存有效期和合作状态。"""
     if request.method == "POST":
         require_permission("manage_suppliers")
         supplier = Supplier(
@@ -1520,6 +1600,7 @@ def suppliers():
 @login_required
 @permission_required("view_equipment")
 def equipment():
+    """查询或新增设备，为故障报修提供标准设备选项。"""
     if request.method == "POST":
         require_permission("manage_equipment")
         item = Equipment(
@@ -1536,10 +1617,12 @@ def equipment():
     return render_template("equipment.html", equipment=Equipment.query.order_by(Equipment.line_name).all())
 
 
+# ==================== 9. 采购、入库与在库事务 ====================
 @app.route("/procurement", methods=["GET", "POST"])
 @login_required
 @permission_required("view_procurement")
 def procurement():
+    """创建采购需求、维护询比价信息并展示审批状态。"""
     if request.method == "POST":
         require_permission("create_procurement")
         part = db.get_or_404(Part, int(request.form["part_id"]))
@@ -1573,6 +1656,7 @@ def procurement():
 @login_required
 @permission_required("create_procurement")
 def generate_procurement():
+    """根据安全库存批量生成补货建议，避免为同一备件重复建单。"""
     created = 0
     for part in Part.query.all():
         exists = Procurement.query.filter(
@@ -1603,6 +1687,7 @@ def generate_procurement():
 @app.route("/procurement/<int:item_id>/<action>", methods=["POST"])
 @permission_required("approve_procurement")
 def procurement_action(item_id, action):
+    """中层或管理员批准/驳回采购申请，并记录审计信息。"""
     item = db.get_or_404(Procurement, item_id)
     if action not in {"approve", "reject"}:
         abort(404)
@@ -1617,6 +1702,7 @@ def procurement_action(item_id, action):
 @login_required
 @permission_required("view_inbound")
 def inbound():
+    """登记到货并在同一数据库事务中增加库存、写流水和审计。"""
     if request.method == "POST":
         require_permission("manage_inbound")
         part = db.get_or_404(Part, int(request.form["part_id"]))
@@ -1665,6 +1751,7 @@ def inbound():
 @login_required
 @permission_required("view_stock")
 def stock():
+    """展示库存风险；提交盘点时计算差异并生成库存纠正流水。"""
     if request.method == "POST":
         require_permission("manage_stock")
         part = db.get_or_404(Part, int(request.form["part_id"]))
@@ -1707,7 +1794,9 @@ def stock():
     )
 
 
+# ==================== 10. 故障、二维码报修与维修领用 ====================
 def create_fault_from_form(public=False):
+    """复用后台和公开报修表单的建单逻辑；公开入口只接收受限字段。"""
     equipment_item = db.get_or_404(Equipment, int(request.form["equipment_id"]))
     source = request.form.get("source", "").strip().lower()
     item = FaultReport(
@@ -1728,6 +1817,7 @@ def create_fault_from_form(public=False):
 @login_required
 @permission_required("view_faults")
 def faults():
+    """后台查看和创建故障，并计算月度/年度损管比演示指标。"""
     if request.method == "POST":
         require_permission("report_fault")
         item = create_fault_from_form()
@@ -1747,6 +1837,7 @@ def faults():
 
 @app.route("/fault-report", methods=["GET", "POST"])
 def public_fault():
+    """无需登录的移动端故障提报页；成功后返回可跟踪的故障编号。"""
     report_source = request.values.get("source", "").strip().lower()
     if report_source not in {"qr"}:
         report_source = ""
@@ -1763,6 +1854,7 @@ def public_fault():
 
 @app.get("/scan/fault")
 def scan_fault():
+    """兼容旧二维码地址，并跳转到当前公共故障表单。"""
     """Stable public entry encoded into the dashboard QR code."""
     lang = request.args.get("lang", "zh")
     if lang in {"zh", "en"}:
@@ -1772,6 +1864,7 @@ def scan_fault():
 
 @app.route("/fault-report/qr.png")
 def fault_qr():
+    """根据 PUBLIC_BASE_URL 生成真实可扫描的 HTTPS 故障入口二维码。"""
     base_url = PUBLIC_BASE_URL or request.url_root.rstrip("/")
     lang = request.args.get("lang", session.get("lang", "zh"))
     if lang not in {"zh", "en"}:
@@ -1798,8 +1891,10 @@ def fault_qr():
     return response
 
 
+# ==================== 11. 健康检查与 AI 助手 API ====================
 @app.get("/healthz")
 def healthz():
+    """供服务器和隧道巡检，返回版本、状态和 AI 是否配置，不返回密钥。"""
     return {
         "status": "ok",
         "version": APP_VERSION,
@@ -1812,6 +1907,7 @@ def healthz():
 @login_required
 @permission_required("dashboard")
 def assistant_alerts():
+    """返回角色过滤后的预警摘要，供助手卡片定时刷新。"""
     return {
         "status": "ok",
         "snapshot": assistant_snapshot(current_user),
@@ -1825,6 +1921,7 @@ def assistant_alerts():
 @login_required
 @permission_required("dashboard")
 def assistant_chat():
+    """执行只读工具并返回本地或 Cloudflare 自然语言答案。"""
     payload = request.get_json(silent=True) or {}
     question = unicodedata.normalize("NFKC", str(payload.get("message", ""))).strip()
     if not question:
@@ -1848,6 +1945,7 @@ def assistant_chat():
 
 @app.route("/favicon.ico")
 def favicon():
+    """返回空图标响应，避免浏览器的自动请求落入 404 页面。"""
     return Response(status=204)
 
 
@@ -1855,6 +1953,7 @@ def favicon():
 @login_required
 @permission_required("process_fault")
 def process_fault(fault_id):
+    """处理故障和维修领用；校验库存后扣减并创建寿命/处置记录。"""
     fault = db.get_or_404(FaultReport, fault_id)
     need_replacement = request.form.get("need_replacement") == "yes"
     fault.handler = current_user.display_name
@@ -1917,10 +2016,12 @@ def process_fault(fault_id):
     return redirect(url_for("faults"))
 
 
+# ==================== 12. 寿命预警、废弃件与数据导出 ====================
 @app.route("/lifecycle")
 @login_required
 @permission_required("view_lifecycle")
 def lifecycle():
+    """展示全部单件寿命记录及按剩余寿命计算的三级预警。"""
     items = Lifecycle.query.order_by(Lifecycle.installed_at.desc()).all()
     return render_template("lifecycle.html", items=items)
 
@@ -1929,6 +2030,7 @@ def lifecycle():
 @login_required
 @permission_required("manage_lifecycle")
 def lifecycle_action(item_id, action):
+    """执行更换、延期申请或确认等寿命管控动作。"""
     item = db.get_or_404(Lifecycle, item_id)
     if action == "extend":
         if item.classification == "安全核心件":
@@ -1955,6 +2057,7 @@ def lifecycle_action(item_id, action):
 @login_required
 @permission_required("view_disposals")
 def disposals():
+    """展示维修拆下的旧件及其待修复、回库或报废状态。"""
     return render_template(
         "disposals.html", items=Disposal.query.order_by(Disposal.created_at.desc()).all()
     )
@@ -1964,6 +2067,7 @@ def disposals():
 @login_required
 @permission_required("manage_disposals")
 def disposal_decide(item_id):
+    """审批废弃件去向；修复回库时同步增加对应备件库存。"""
     item = db.get_or_404(Disposal, item_id)
     item.reusable = request.form.get("reusable") == "yes"
     item.opinion = request.form.get("opinion", "").strip()
@@ -1984,6 +2088,7 @@ def disposal_decide(item_id):
 @login_required
 @permission_required("export_data")
 def export_csv(kind):
+    """按权限导出库存、故障等 CSV，并写入 UTF-8 BOM 兼容 Excel。"""
     output = io.StringIO()
     output.write("\ufeff")
     writer = csv.writer(output)
@@ -2010,15 +2115,19 @@ def export_csv(kind):
 
 @app.errorhandler(403)
 def forbidden(_error):
+    """统一渲染 403 无权限页面。"""
     return render_template("error.html", code=403, message="当前账号没有此项审批权限"), 403
 
 
 @app.errorhandler(404)
 def not_found(_error):
+    """统一渲染 404 页面，避免向用户暴露内部异常。"""
     return render_template("error.html", code=404, message="您访问的内容不存在"), 404
 
 
+# ==================== 13. 数据库初始化与演示数据 ====================
 def seed_database():
+    """首次启动写入演示主数据；演示模式还会恢复预置账户密码。"""
     if DEMO_MODE:
         User.query.filter_by(username="operator").delete()
     for username, password, display_name, role, department in DEMO_ACCOUNTS:
@@ -2092,6 +2201,7 @@ def seed_database():
 
 
 def ensure_user_schema():
+    """为旧版 SQLite 数据库补充用户审批字段，支持平滑升级。"""
     columns = {row[1] for row in db.session.execute(text('PRAGMA table_info("user")')).fetchall()}
     migrations = {
         "active": 'ALTER TABLE "user" ADD COLUMN active BOOLEAN NOT NULL DEFAULT 1',
@@ -2105,6 +2215,7 @@ def ensure_user_schema():
 
 
 def init_app():
+    """创建表、执行兼容升级并初始化演示数据。"""
     with app.app_context():
         db.create_all()
         ensure_user_schema()

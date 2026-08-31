@@ -1,3 +1,4 @@
+{# 故障与领用：连接故障提报、维修处理、库存扣减、寿命建档和损管比图表。 #}
 {% extends 'base.html' %}{% block title %}故障与领用{% endblock %}{% block page_title %}故障与领用出库{% endblock %}{% block content %}
 <div class="page-head"><div><h2>{{ t('设备故障与维修领用') }}</h2><p>故障工单强关联领用记录，自动校验库存并建立备件寿命档案</p></div>{% if can('report_fault') %}<div class="actions"><a class="btn btn-ghost" target="_blank" href="{{ url_for('public_fault') }}">移动端表单</a><button class="btn btn-primary" data-modal-open="fault-modal">＋ {{ t('故障提报') }}</button></div>{% endif %}</div>
 <div class="grid grid-2" style="margin-bottom:17px">

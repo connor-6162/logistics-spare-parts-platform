@@ -1,3 +1,4 @@
+{# 备件主数据：维护编码、品目、规格、货位、库存和安全上下限。 #}
 {% extends 'base.html' %}{% block title %}备件基础信息{% endblock %}{% block page_title %}备件基础信息{% endblock %}{% block content %}
 <div class="page-head"><div><h2>备品备件目录</h2><p>统一维护类型、品目、规格、编码、货位与库存上下限</p></div>{% if can('manage_parts') %}<button class="btn btn-primary" data-modal-open="part-modal">＋ 新增备件</button>{% endif %}</div>
 <div class="toolbar"><form class="search" method="get"><input name="q" value="{{ keyword }}" placeholder="搜索编号、品目或规格"><button class="btn">查询</button></form><a class="btn btn-ghost" href="{{ url_for('export_csv', kind='stock') }}">导出目录</a></div>

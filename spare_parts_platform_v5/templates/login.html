@@ -1,3 +1,4 @@
+{# 登录页：包含中英文切换、密码显隐、演示账户快捷填充和服务器端认证表单。 #}
 <!doctype html><html lang="{{ 'en' if current_lang == 'en' else 'zh-CN' }}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>登录 - 备件智管平台</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
 <body><div style="position:fixed;right:20px;top:18px;z-index:10" class="language-switch"><a class="{{ 'active' if current_lang == 'zh' }}" href="{{ url_for('set_language', lang='zh') }}">{{ 'ZH' if current_lang == 'en' else '中文' }}</a><a class="{{ 'active' if current_lang == 'en' }}" href="{{ url_for('set_language', lang='en') }}">EN</a></div><div class="login-page">
   <section class="login-showcase">
