@@ -61,12 +61,13 @@ if (-not (Test-Path -LiteralPath $VenvPython)) {
 & $VenvPython -m pip install --upgrade pip
 & $VenvPython -m pip install -r (Join-Path $AppRoot "requirements.txt")
 
-$SecretBytes = New-Object byte[] 48
-[Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($SecretBytes)
-$SecretKey = [Convert]::ToBase64String($SecretBytes)
 $ConfigPath = Join-Path $AppRoot "deployment\windows\production.env.ps1"
-$DatabasePath = (Join-Path $DataRoot "spare_parts.db").Replace("\", "/")
-$Config = @"
+if (-not (Test-Path -LiteralPath $ConfigPath)) {
+    $SecretBytes = New-Object byte[] 48
+    [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($SecretBytes)
+    $SecretKey = [Convert]::ToBase64String($SecretBytes)
+    $DatabasePath = (Join-Path $DataRoot "spare_parts.db").Replace("\", "/")
+    $Config = @"
 `$env:SECRET_KEY = '$SecretKey'
 `$env:DATABASE_URL = 'sqlite:///$DatabasePath'
 `$env:DEMO_MODE = 'True'
@@ -80,10 +81,21 @@ $Config = @"
 `$env:AI_PROVIDER = 'cloudflare'
 `$env:CLOUDFLARE_ACCOUNT_ID = ''
 `$env:CLOUDFLARE_API_TOKEN = ''
-`$env:CLOUDFLARE_AI_MODEL = '@cf/meta/llama-3.1-8b-instruct'
+`$env:CLOUDFLARE_AI_MODEL = '@cf/meta/llama-3.1-8b-instruct-fast'
 `$env:AI_TIMEOUT_SECONDS = '12'
 "@
-Set-Content -LiteralPath $ConfigPath -Value $Config -Encoding UTF8
+    Set-Content -LiteralPath $ConfigPath -Value $Config -Encoding UTF8
+} else {
+    # Never overwrite production secrets during an application update. Only migrate
+    # the deprecated model name while preserving the API token and session key.
+    $ExistingConfig = Get-Content -LiteralPath $ConfigPath -Raw
+    $ExistingConfig = $ExistingConfig.Replace(
+        '@cf/meta/llama-3.1-8b-instruct''',
+        '@cf/meta/llama-3.1-8b-instruct-fast'''
+    )
+    Set-Content -LiteralPath $ConfigPath -Value $ExistingConfig -Encoding UTF8
+    Write-Host "Existing production configuration and secrets were preserved." -ForegroundColor Cyan
+}
 
 $StartScript = Join-Path $AppRoot "deployment\windows\start_server.ps1"
 $PowerShellExe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"

@@ -458,8 +458,9 @@ class PlatformFlowTest(unittest.TestCase):
             self.assertEqual(payload["answer"], "AI-generated inventory summary")
             self.assertIn("get_low_stock", payload["tools_used"])
             request_json = post.call_args.kwargs["json"]
-            self.assertIn("READ_ONLY_DATA", request_json["prompt"])
-            self.assertNotIn("test-token", request_json["prompt"])
+            self.assertEqual(request_json["messages"][0]["role"], "system")
+            self.assertEqual(request_json["messages"][1]["role"], "user")
+            self.assertNotIn("test-token", str(request_json))
 
             with patch.object(
                 self.module.requests,
@@ -474,6 +475,57 @@ class PlatformFlowTest(unittest.TestCase):
             payload = response.get_json()
             self.assertEqual(payload["source"], "local")
             self.assertIn("待处理故障", payload["answer"])
+        finally:
+            (
+                self.module.AI_PROVIDER,
+                self.module.AI_ACCOUNT_ID,
+                self.module.AI_API_TOKEN,
+            ) = previous
+
+    def test_ai_inventory_details_are_complete_natural_language(self):
+        response = self.client.post(
+            "/api/assistant/chat",
+            json={"message": "目前所有库存的数据是多少"},
+            headers={"X-CSRF-Token": self.token()},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["source"], "local")
+        self.assertEqual(payload["tools_used"], ["get_inventory"])
+        self.assertIn("库存总量", payload["answer"])
+        self.assertIn("QD-QG-IC50B350", payload["answer"])
+        self.assertNotIn('[{"code"', payload["answer"])
+        self.assertNotIn("ANSWER:", payload["answer"])
+
+    def test_ai_prompt_echo_is_rejected_and_falls_back_to_local(self):
+        previous = (
+            self.module.AI_PROVIDER,
+            self.module.AI_ACCOUNT_ID,
+            self.module.AI_API_TOKEN,
+        )
+        self.module.AI_PROVIDER = "cloudflare"
+        self.module.AI_ACCOUNT_ID = "test-account"
+        self.module.AI_API_TOKEN = "test-token"
+        repeated = Mock()
+        repeated.raise_for_status.return_value = None
+        repeated.json.return_value = {
+            "success": True,
+            "result": {
+                "response": 'ANSWER: [{"code":"A"}]。请使用简洁中文回答。 '
+                'ANSWER: [{"code":"A"}]。请使用简洁中文回答。'
+            },
+        }
+        try:
+            with patch.object(self.module.requests, "post", return_value=repeated):
+                response = self.client.post(
+                    "/api/assistant/chat",
+                    json={"message": "当前库存风险如何？"},
+                    headers={"X-CSRF-Token": self.token()},
+                )
+            payload = response.get_json()
+            self.assertEqual(payload["source"], "local")
+            self.assertIn("低库存", payload["answer"])
+            self.assertNotIn("ANSWER:", payload["answer"])
         finally:
             (
                 self.module.AI_PROVIDER,

@@ -75,10 +75,10 @@ V5 采用服务器端完整英文渲染，并保留前端兼容翻译。即使�
 $env:AI_PROVIDER = "cloudflare"
 $env:CLOUDFLARE_ACCOUNT_ID = "你的 Cloudflare Account ID"
 $env:CLOUDFLARE_API_TOKEN = "具有 Workers AI Read/Edit 权限的令牌"
-$env:CLOUDFLARE_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct"
+$env:CLOUDFLARE_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast"
 ```
 
-助手只允许调用 `get_low_stock`、`get_faults` 和 `get_lifecycle_alerts` 三个只读函数，不具备新增、修改、审批或删除权限。不要把 API Token 写入 HTML、JavaScript、Git 仓库或聊天记录。
+助手只允许调用 `get_inventory`、`get_low_stock`、`get_faults` 和 `get_lifecycle_alerts` 等只读函数，不具备新增、修改、审批或删除权限。完整数据与明细问题由后端直接生成自然语言，其他对话使用角色化消息调用外部 AI；异常回显、原始 JSON 和重复段落会被拦截并自动降级为本地回答。不要把 API Token 写入 HTML、JavaScript、Git 仓库或聊天记录。
 
 局域网演示可执行：
 
